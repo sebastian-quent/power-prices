@@ -8,6 +8,7 @@ from prefect import flow
 
 from core import PriceStore, setup_logging  # noqa: E402 (must precede Database import, see core/dev_paths.py)
 from Database.db_connect import engine
+from quent_core.utils.email_utils import send_email
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +44,20 @@ def check_completeness(target_date: dt.date) -> list[str]:
 
 
 def send_alert(missing_zones: list[str], target_date: dt.date) -> None:
-    """notify that one or more in-scope zones have no DAY_AHEAD data for target_date.
-
-    TODO: wire up an actual channel (email vs Teams - not decided yet). logging only for now.
-    """
+    """notify that one or more in-scope zones have no DAY_AHEAD data for target_date."""
     logger.warning(
         "day-ahead completeness check: %d zone(s) missing data for %s: %s",
         len(missing_zones),
         target_date,
         ", ".join(missing_zones),
     )
+
+    subject = f"Day-ahead completeness: {len(missing_zones)} zone(s) missing for {target_date}"
+    content = f"Missing DAY_AHEAD data for {target_date}:\n" + "\n".join(missing_zones)
+    try:
+        send_email(subject, content, recipient="sebastian@quent.dk")
+    except Exception:
+        logger.exception("day-ahead completeness alert: failed to send email for %s", target_date)
 
 
 # cron: 0 17 * * *  (CET/CEST; runs after every live source's catch-up window for tomorrow's

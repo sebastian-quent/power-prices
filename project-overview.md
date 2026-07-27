@@ -150,7 +150,20 @@ Verified with `scripts/verify_backfill.py` — a day-by-day gap scan across all 
 
 ## Scheduling
 
-Design only — nothing deployed yet (see Open items). Captured here because the grouping/catch-up/redundancy decisions are non-obvious and worth settling before wiring up Prefect deployments.
+Deployment scripts prepared in-repo, not yet run against the server (see Open items). Captured here because the grouping/catch-up/redundancy decisions are non-obvious and worth settling before wiring up Prefect deployments.
+
+**Infrastructure (2026-07-27 decision)**: the Prefect server itself is shared with Production/Algos — self-hosted, Postgres-backed, run from `Production/Prefect/` in the sibling `Production` repo (not this one), with existing `prod`/`algos` process-type work pools each executing under that repo's/Algos' own poetry venv. Deliberately **not** reusing `prod`/`algos` for this repo's flows: a process-type work pool executes using whatever Python environment launched its polling worker, so a flow deployed onto `prod`/`algos` would run under Production's/Algos' pinned `quent_core` rev instead of this repo's own (`v1.0.161-seb-database-functions`, see CLAUDE.md) — the same class of bug as the past global-interpreter incident CLAUDE.md already documents. Instead: a separate `day_ahead_prices` work pool, with its own worker process running from this repo's own venv, still against the same shared server (`http://127.0.0.1:4200/api`) — no change to the server, its DB, or the reverse-proxied UI.
+
+Prepared in this repo:
+- `Prefect/deploy_flows.py` — registers all 12 day-ahead flows plus the monitoring flow onto the `day_ahead_prices` work pool, one `deploy_flow()` call per entrypoint using the cron(s) documented below. Deleting/re-registering is scoped to `work_pool_name == "day_ahead_prices"` only, so it can never touch Production/Algos' deployments.
+- `Prefect/run_prefect_worker.bat` — starts one worker (`--limit 3`) polling only the `day_ahead_prices` pool, `cd`'d into this repo so `poetry run` resolves this repo's own venv, no `PYTHONPATH` sharing with Production/Algos.
+
+Still needed, server-side, on the `Administrator` box that already hosts the shared server (none of this touches the Production repo's own files):
+1. Clone this repo there (e.g. `C:\Users\Administrator\Documents\GitHub\day_ahead_prices`) and `poetry install`.
+2. One-time `poetry run prefect work-pool create day_ahead_prices --type process` against the shared server.
+3. `poetry run python Prefect/deploy_flows.py` to register the deployments.
+4. Start `Prefect/run_prefect_worker.bat`, then wire it to its own new Windows Scheduled Task (separate from whatever launches Production's `run_start_prefect.bat`) so it survives reboots.
+5. Optional, deliberately deferred: adding this pool's worker to `Production/monitor_prefect.py`'s watchdog coverage — the one step that would touch a Production file, left as a later decision rather than done by default.
 
 **Granularity**: one Prefect deployment per `@flow`-decorated function. Each flow processes only the zones/markets passed to `fetch_and_parse()` — EPEX and ENTSO-E each expose two flows in the same file (`run()` for SDAC zones, `run_gb()`/`run_ie()` for the one non-SDAC zone), so a schedule can target either without wasting a call on the other's not-yet-published zone. That's 12 flows total for day-ahead: `nordpool`, `nordpool_gb`, `epex.run`, `epex.run_gb`, `entsoe.run`, `entsoe.run_ie`, `ote`, `semo`, `opcom`, `omie`, `okte`, `enex`.
 
@@ -174,8 +187,8 @@ A Prefect flow only fails on a code exception — correct for genuine errors, bu
 - **In-scope zones**: a static list of every zone from the matrix above with ≥1 live source (35 country-level rows, expanded to 41 `bidding_zone` codes since IT counts as 7 ENTSO-E sub-zones). Hardcoded directly in the script rather than shared via `core/`, since scrapers may split into their own repos later — revisit as a `core/` constant only if that need actually arises.
 - **Delivery-day bounds**: reuses the same `_day_bounds_utc()` pattern (pytz `localize()` + `.astimezone(utc)`) already duplicated across `entsoe`/`opcom`/`enex`, anchored to `Europe/Copenhagen` — the same single CET/CEST anchor every existing scraper uses, including for GB/IE (see the flat +1h DST assumption in Scheduling).
 - **Timing**: `0 17 * * *` CET/CEST — after every live source's catch-up window for tomorrow's delivery day has closed (GB HalfHourly is the latest, ~15:30 CET).
-- **Never fails the Prefect run** on missing data — a zone with zero rows is logged (and will be alerted, once the channel below is picked), not raised as an exception.
-- **Alerting — open decision**: `send_alert()` currently only logs a warning listing the missing zones. Email vs. Teams (or something else) is not decided yet, left as a stub rather than guessed.
+- **Never fails the Prefect run** on missing data — a zone with zero rows is logged and alerted, not raised as an exception.
+- **Alerting**: `send_alert()` logs a warning listing the missing zones, then emails `sebastian@quent.dk` via `quent_core.utils.email_utils.send_email()` (AWS SES-backed, already used elsewhere for `info@quent.dk` alerts — no new plumbing needed). Deliberately a fixed personal recipient, not a team alias, per explicit request — revisit if this needs to reach more than one person. `send_email()` itself falls back to Teams if SES fails; a failure of *that* fallback too is caught here and logged rather than raised, so a broken alert channel can't fail the Prefect run.
 - **Not done yet**: no Prefect deployment/schedule created for this flow (same "design only" status as Scheduling).
 
 **`monitoring/coverage.py`** — Streamlit prototype (run with `poetry run streamlit run monitoring/coverage.py`), for eyeballing "which zone from which scraper is in already" without querying the DB by hand. Separate from the completeness check above, not a replacement for it: interactive/manual, per-**source** granularity, no deployment/alerting of its own.
@@ -250,8 +263,7 @@ curve chart, to stay minimal.
 - Market code reference/lookup table — only if free-text `market` values start causing problems; `id-tables-design.drawio` sketches an FK-based alternative (see Data model).
 - Day-ahead volumes alongside prices — needs a schema decision (extend `prod.prices` vs. separate table); currently out of scope.
 - CROPEX (HR), HUPX (HU), GME (IT), BSP Southpool (SI) — not started, blocked on paid/unconfirmed access (see Sources).
-- No Prefect deployment/schedule exists yet for any flow — design only (see Scheduling), including the monitoring flow.
-- Alert channel for `monitoring/day_ahead_completeness.py` (email vs. Teams) not decided — currently logs only.
+- No Prefect deployment/schedule is live yet for any flow — `Prefect/deploy_flows.py` and `Prefect/run_prefect_worker.bat` are prepared in-repo (see Scheduling), but the `day_ahead_prices` work pool hasn't been created on the shared server yet, nothing has been cloned/installed on the `Administrator` box, and no worker or Scheduled Task is running there yet — including for the monitoring flow.
 - Re-enable publishing to `quent-data-stream` once `quent_core`'s streaming rework lands (see Streaming) — expected as a small add-on to `quent_core.database.price_store.PriceStore`, not a rebuild.
 
 ## Not to forget later
