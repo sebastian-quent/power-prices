@@ -36,6 +36,56 @@ const zoneLayers = new Map(); // bidding_zone -> Leaflet layer, built once
 let hoverTooltip = null;
 let closeTimer = null;
 
+// display label for the empty-note in the hover card only - mirrors app.py's MARKET_OPTIONS keys
+const MARKET_LABELS = { day_ahead: "day-ahead", ida2: "IDA2" };
+
+// mirrors app.py's MARKET_OPTIONS keys - switching market always drops any explicit date so the
+// backend's own per-market default kicks in (tomorrow for day-ahead, today for IDA2), since a
+// date picked in one view rarely makes sense carried over into the other.
+let currentMarket = "day_ahead";
+
+function setActiveAuctionRow() {
+  document.querySelectorAll(".auction-row").forEach((row) => {
+    row.classList.toggle("active", row.dataset.market === currentMarket);
+  });
+}
+
+function selectMarket(market) {
+  if (market === currentMarket) return;
+  currentMarket = market;
+  setActiveAuctionRow();
+  // the date picker is the source of truth once the page has loaded (day-ahead/tomorrow is
+  // only the startup default) - switching auctions must not jump the date back to that
+  // auction's own default, so the currently selected date is passed through explicitly.
+  loadPrices(document.getElementById("date-input").value);
+}
+
+function auctionRowHtml(a) {
+  return `
+    <div class="auction-row" data-market="${a.key}">
+      <span class="auction-light ${a.status}"></span>
+      <div class="auction-main">
+        <span class="auction-name">${a.label}</span>
+        <span class="auction-meta">${a.have}/${a.total} zones &middot; clears ${a.clears}</span>
+      </div>
+    </div>
+  `;
+}
+
+// auctions panel: status per auction for whatever date is currently on the map (dateStr comes
+// straight from the resolved /api/prices date, see loadPrices/main below) - so paging back to
+// an already-backfilled day shows e.g. 41/41 there, not always the live day's own status.
+async function loadAuctions(dateStr) {
+  const params = dateStr ? `?date=${dateStr}` : "";
+  const data = await fetch(`/api/auctions${params}`).then((r) => r.json());
+  const list = document.getElementById("auctions-list");
+  list.innerHTML = data.auctions.map(auctionRowHtml).join("");
+  list.querySelectorAll(".auction-row").forEach((row) => {
+    row.addEventListener("click", () => selectMarket(row.dataset.market));
+  });
+  setActiveAuctionRow();
+}
+
 // hovering the tooltip itself counts as "still hovering the zone" - without this, moving the
 // mouse from the shape onto the card fires the layer's mouseout and the card vanishes before
 // you can actually reach it.
@@ -89,13 +139,17 @@ function zoneStyle(info) {
   }
   if (info && info.has_data) {
     // priced, but in a currency not on the EUR scale above - a deliberately distinct (not
-    // green/amber/red, not the pending off-white) treatment so it doesn't get misread as
+    // green/amber/red, not the pending grey) treatment so it doesn't get misread as
     // either "cheap" or "no data".
     return { fillColor: cssVar("--noneur-fill"), fillOpacity: 0.85, color: cssVar("--noneur-stroke"), weight: 1 };
   }
+  // in-scope zone, just no rows landed yet for this day ("pending") - low fillOpacity keeps it
+  // close to the map's own background so it doesn't compete for attention with priced zones,
+  // while still reading as a distinct, lighter shade from the context layer's dark grey
+  // (out-of-scope zones, see the context.geojson style() below).
   return {
-    fillColor: cssVar("--nodata-fill"), fillOpacity: 1,
-    color: cssVar("--nodead-stroke"), weight: 1, dashArray: "3,3",
+    fillColor: cssVar("--nodata-fill"), fillOpacity: 0.4,
+    color: cssVar("--nodead-stroke"), weight: 1,
   };
 }
 
@@ -129,14 +183,21 @@ function curveChartHtml(info) {
   const prices = info.curve.map((p) => p.price);
   const lo = Math.min(...prices), hi = Math.max(...prices);
   const span = hi - lo || 1;
-  const stepX = (W - PAD * 2) / (info.curve.length - 1);
-  const points = info.curve.map((p, i) => [
-    PAD + i * stepX,
-    PAD + (H - PAD * 2) * (1 - (p.price - lo) / span),
-  ]);
+  // step-after line: each settlement period is a flat segment spanning its own width (like
+  // Nordpool's day-ahead chart), not a diagonal between period-start points - a straight line
+  // implies the price glides continuously within a period, which isn't the case.
+  const n = info.curve.length;
+  const stepX = (W - PAD * 2) / n;
+  const xAt = (i) => PAD + i * stepX; // left edge of period i
+  const yAt = (price) => PAD + (H - PAD * 2) * (1 - (price - lo) / span);
 
-  const line = points.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-  const area = `${line} L${points[points.length - 1][0].toFixed(1)},${H - PAD} L${points[0][0].toFixed(1)},${H - PAD} Z`;
+  let line = `M${xAt(0).toFixed(1)},${yAt(prices[0]).toFixed(1)}`;
+  for (let i = 0; i < n; i++) {
+    const xEnd = xAt(i + 1);
+    line += ` L${xEnd.toFixed(1)},${yAt(prices[i]).toFixed(1)}`;
+    if (i < n - 1) line += ` L${xEnd.toFixed(1)},${yAt(prices[i + 1]).toFixed(1)}`;
+  }
+  const area = `${line} L${xAt(n).toFixed(1)},${H - PAD} L${xAt(0).toFixed(1)},${H - PAD} Z`;
 
   let zeroLine = "";
   if (lo < 0 && hi > 0) {
@@ -146,22 +207,27 @@ function curveChartHtml(info) {
 
   const maxIdx = prices.indexOf(hi);
   const minIdx = prices.indexOf(lo);
-  const dot = ([x, y]) => `<circle class="chart-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.2" />`;
+  // dot sits mid-way across the period's flat segment, not at its leading edge.
+  const dot = (i) => `<circle class="chart-dot" cx="${(xAt(i) + stepX / 2).toFixed(1)}" cy="${yAt(prices[i]).toFixed(1)}" r="2.2" />`;
 
   return `
     <div class="curve-heading">Baseload curve &mdash; ${info.curve_source}</div>
-    <svg class="curve-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="fill-${info.curve_source.replace(/\W/g, "")}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" class="chart-fill-a" />
-          <stop offset="100%" class="chart-fill-b" />
-        </linearGradient>
-      </defs>
-      ${zeroLine}
-      <path d="${area}" fill="url(#fill-${info.curve_source.replace(/\W/g, "")})" />
-      <path d="${line}" class="chart-line" />
-      ${dot(points[maxIdx])}${dot(points[minIdx])}
-    </svg>
+    <div class="chart-wrap">
+      <svg class="curve-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="fill-${info.curve_source.replace(/\W/g, "")}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" class="chart-fill-a" />
+            <stop offset="100%" class="chart-fill-b" />
+          </linearGradient>
+        </defs>
+        ${zeroLine}
+        <path d="${area}" fill="url(#fill-${info.curve_source.replace(/\W/g, "")})" />
+        <path d="${line}" class="chart-line" />
+        ${dot(maxIdx)}${dot(minIdx)}
+      </svg>
+      <div class="chart-hover-line"></div>
+      <div class="chart-hover-label"></div>
+    </div>
     <div class="chart-minmax">
       <span>${info.curve[minIdx].time} &middot; ${lo.toFixed(1)} ${info.currency}</span>
       <span>${info.curve[maxIdx].time} &middot; ${hi.toFixed(1)} ${info.currency}</span>
@@ -169,12 +235,48 @@ function curveChartHtml(info) {
   `;
 }
 
+// crosshair + value label on hover - expanded view only. the compact card stays a plain,
+// non-interactive glance; anyone wanting the per-period detail is expected to expand first.
+// re-bound after every setContent() (the toggle button's expand/collapse replaces the DOM, old
+// listeners go with it). period index comes from cursor x-position alone (no need to mirror
+// curveChartHtml's y-axis price mapping) since the label only ever needs that period's own value.
+function bindChartHover(root, info, expanded) {
+  if (!expanded) return;
+  const wrap = root.querySelector(".chart-wrap");
+  if (!wrap || !info || !info.curve.length) return;
+  const line = wrap.querySelector(".chart-hover-line");
+  const label = wrap.querySelector(".chart-hover-label");
+  const n = info.curve.length;
+
+  wrap.addEventListener("mousemove", (e) => {
+    const rect = wrap.getBoundingClientRect();
+    const relX = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const idx = Math.min(n - 1, Math.floor(relX * n));
+    const point = info.curve[idx];
+    const pct = ((idx + 0.5) / n) * 100;
+
+    line.style.left = `${pct}%`;
+    line.style.display = "block";
+
+    label.textContent = `${point.time} · ${point.price.toFixed(2)} ${info.currency}`;
+    label.style.left = `${pct}%`;
+    // clamp near the edges so the label doesn't spill outside the card.
+    label.style.transform = pct < 8 ? "translateX(0)" : pct > 92 ? "translateX(-100%)" : "translateX(-50%)";
+    label.style.display = "block";
+  });
+
+  wrap.addEventListener("mouseleave", () => {
+    line.style.display = "none";
+    label.style.display = "none";
+  });
+}
+
 function tooltipHtml(zoneCode, info, expanded) {
   const name = ZONE_NAMES[zoneCode] || "";
   const expandBtn = `<button class="expand-btn" aria-label="${expanded ? "Collapse" : "Expand"}" title="${expanded ? "Collapse" : "Expand"}">${expanded ? "&#10529;" : "&#10530;"}</button>`;
   const title = `<div class="zone-title">${zoneCode}<span class="zone-name">${name}</span>${expandBtn}</div>`;
   if (!info || !info.has_data) {
-    return `${title}<div class="empty-note">no DAY_AHEAD data yet</div>`;
+    return `${title}<div class="empty-note">no ${MARKET_LABELS[currentMarket]} data yet</div>`;
   }
   const headlineColor = info.currency === SCALE_CURRENCY ? priceToColor(info.avg_price) : cssVar("--noneur-stroke");
   return `
@@ -215,10 +317,12 @@ function shiftDate(dateStr, days) {
 }
 
 async function loadPrices(dateStr) {
-  const url = dateStr ? `/api/prices?date=${dateStr}` : "/api/prices";
-  const prices = await fetch(url).then((r) => r.json());
+  const params = new URLSearchParams({ market: currentMarket });
+  if (dateStr) params.set("date", dateStr);
+  const prices = await fetch(`/api/prices?${params}`).then((r) => r.json());
   document.getElementById("date-input").value = prices.date;
   applyPrices(prices.zones);
+  loadAuctions(prices.date);
 }
 
 async function main() {
@@ -226,22 +330,25 @@ async function main() {
     fetch("/static/geo/context.geojson").then((r) => r.json()),
     fetch("/static/geo/grid.geojson").then((r) => r.json()),
     fetch("/static/geo/zones.geojson").then((r) => r.json()),
-    fetch("/api/prices").then((r) => r.json()),
+    fetch(`/api/prices?market=${currentMarket}`).then((r) => r.json()),
   ]);
 
   const priceByZone = prices.zones;
   document.getElementById("date-input").value = prices.date;
+  loadAuctions(prices.date);
   computePriceRange(priceByZone);
   updateScaleLegend();
 
   // zoomSnap/zoomDelta below 1 let the map rest at quarter zoom levels instead of only whole
   // integers - Leaflet's default (zoomSnap: 1) is what makes wheel-zoom feel stepped/jumpy,
   // since every scroll tick has to commit to a full level; a smaller snap lets it ease in
-  // continuously instead.
+  // continuously instead. zoomControl is added separately, top-right, to leave the top-left
+  // corner free for the auctions panel.
   map = L.map("map", {
-    attributionControl: true, zoomControl: true, worldCopyJump: false, maxBoundsViscosity: 1.0,
+    attributionControl: true, zoomControl: false, worldCopyJump: false, maxBoundsViscosity: 1.0,
     zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 100,
   });
+  L.control.zoom({ position: "topright" }).addTo(map);
   map.attributionControl.setPrefix(false);
 
   L.geoJSON(contextGeo, {
@@ -299,6 +406,7 @@ async function main() {
           L.DomEvent.disableClickPropagation(el);
           el.addEventListener("mouseenter", cancelClose);
           el.addEventListener("mouseleave", scheduleClose);
+          bindChartHover(el, layer._priceInfo, expanded);
 
           // setContent() replaces the button along with the rest of the markup, so the click
           // listener needs rebinding after every toggle, not just once.
@@ -313,6 +421,7 @@ async function main() {
               // the card grows/shrinks in place instead of drifting off its anchor.
               hoverTooltip.setContent(tooltipHtml(zoneCode, layer._priceInfo, expanded));
               bindExpandButton();
+              bindChartHover(el, layer._priceInfo, expanded);
             });
           };
           bindExpandButton();

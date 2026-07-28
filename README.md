@@ -14,8 +14,8 @@ supports them.
 - `clients/<source>/client.py` - auth + generic request function for that source
 - `clients/<source>/endpoints/<name>.py` - fetch, parse, dump, `@flow`-decorated `run()`
 - `monitoring/` - `day_ahead_completeness.py` (Prefect flow, zone-level data-completeness
-  check, separate from flow health) and `coverage.py` (Streamlit dashboard, per-source
-  coverage for a given delivery day)
+  check, separate from flow health); `zone_map/` - FastAPI + plain-JS map dashboard showing
+  per-zone coverage and price level (see Dashboard below)
 - `db/migrations/` - DDL for `prod.prices`
 - `scripts/` - one-off backfill/verification drivers, not scheduled
 
@@ -55,6 +55,15 @@ Target table: `prod.prices`, keyed on
 
 Poetry-managed (`pyproject.toml`/`poetry.lock`), own independent venv - not
 merged into Production's, see `project-overview.md`.
+
+## Dashboard
+
+`monitoring/zone_map/` is a standalone map dashboard (coverage + price level per
+bidding zone), run locally with:
+
+```
+poetry run uvicorn monitoring.zone_map.app:app --reload
+```
 
 ## Status
 

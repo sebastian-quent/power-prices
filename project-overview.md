@@ -9,7 +9,7 @@ Redundancy requirement: at least **two independent sources per bidding zone**, s
 ## Scope
 
 - In scope: day-ahead auction prices (`DAY_AHEAD`), all bidding zones listed below, historical backfill (2024-01-01 onward — see Historical backfill), Prefect-scheduled runs with logging.
-- Later, not now: intraday (`INTRADAY`) scrapers. Schema already supports it (see Data model).
+- Later, not now: intraday (`INTRADAY`) scrapers. Schema already supports it (see Data model). One early prototype exists ahead of the rest: `clients/epex/endpoints/ida2.py` scrapes EPEX's Pan-European IDA2 auction for BE only (test case) — not yet extended to other zones, not yet Prefect-deployed.
 - Out of scope: anything not price-related (volumes, nominations, flows, imbalance prices) — stays in existing scraper setups.
 
 ## Architecture
@@ -24,7 +24,7 @@ Redundancy requirement: at least **two independent sources per bidding zone**, s
 - **Prefect**: `@flow` sits directly on each endpoint's `run()`. Logs go to Prefect so failures are visible without digging through server logs.
 - **Storage**: writes directly to Postgres via `PriceStore` (see Dependencies — now sourced from `quent_core`, not this repo).
 - **DB engine**: `from Database.db_connect import engine` — same shared engine as for example `ImbalancePriceHandler`. `PriceStore` takes this as a constructor arg rather than building its own connection.
-- **Dependencies**: Poetry-managed (`pyproject.toml`/`poetry.lock`), own independent `.venv` — not merged into Production's. Shared deps pinned to match Production's exactly; `quent_core` is the one deliberate deviation, pinned to `v1.0.161-seb-database-functions` (Production is on `v1.0.158`). `PriceStore` moved out of this repo (`core/price_store.py` deleted) and now lives in `quent_core.database.price_store` — `core/__init__.py` re-exports it from there so every client's `from core import PriceStore` import is unchanged. `streamlit ~=1.43.0` added for `monitoring/coverage.py`.
+- **Dependencies**: Poetry-managed (`pyproject.toml`/`poetry.lock`), own independent `.venv` — not merged into Production's. Shared deps pinned to match Production's exactly; `quent_core` is the one deliberate deviation, pinned to `v1.0.161` (Production is on `v1.0.158`) — released as an official tag on 2026-07-28, superseding the earlier `v1.0.161-seb-database-functions` dev-branch pin. `PriceStore` moved out of this repo (`core/price_store.py` deleted) and now lives in `quent_core.database.price_store` — `core/__init__.py` re-exports it from there so every client's `from core import PriceStore` import is unchanged.
 
 ## Streaming (quent-data-stream)c
 
@@ -152,7 +152,7 @@ Verified with `scripts/verify_backfill.py` — a day-by-day gap scan across all 
 
 Deployment scripts prepared in-repo, not yet run against the server (see Open items). Captured here because the grouping/catch-up/redundancy decisions are non-obvious and worth settling before wiring up Prefect deployments.
 
-**Infrastructure (2026-07-27 decision)**: the Prefect server itself is shared with Production/Algos — self-hosted, Postgres-backed, run from `Production/Prefect/` in the sibling `Production` repo (not this one), with existing `prod`/`algos` process-type work pools each executing under that repo's/Algos' own poetry venv. Deliberately **not** reusing `prod`/`algos` for this repo's flows: a process-type work pool executes using whatever Python environment launched its polling worker, so a flow deployed onto `prod`/`algos` would run under Production's/Algos' pinned `quent_core` rev instead of this repo's own (`v1.0.161-seb-database-functions`, see CLAUDE.md) — the same class of bug as the past global-interpreter incident CLAUDE.md already documents. Instead: a separate `day_ahead_prices` work pool, with its own worker process running from this repo's own venv, still against the same shared server (`http://127.0.0.1:4200/api`) — no change to the server, its DB, or the reverse-proxied UI.
+**Infrastructure (2026-07-27 decision)**: the Prefect server itself is shared with Production/Algos — self-hosted, Postgres-backed, run from `Production/Prefect/` in the sibling `Production` repo (not this one), with existing `prod`/`algos` process-type work pools each executing under that repo's/Algos' own poetry venv. Deliberately **not** reusing `prod`/`algos` for this repo's flows: a process-type work pool executes using whatever Python environment launched its polling worker, so a flow deployed onto `prod`/`algos` would run under Production's/Algos' pinned `quent_core` rev instead of this repo's own (`v1.0.161`, see CLAUDE.md) — the same class of bug as the past global-interpreter incident CLAUDE.md already documents. Instead: a separate `day_ahead_prices` work pool, with its own worker process running from this repo's own venv, still against the same shared server (`http://127.0.0.1:4200/api`) — no change to the server, its DB, or the reverse-proxied UI.
 
 Prepared in this repo:
 - `Prefect/deploy_flows.py` — registers all 12 day-ahead flows plus the monitoring flow onto the `day_ahead_prices` work pool, one `deploy_flow()` call per entrypoint using the cron(s) documented below. Deleting/re-registering is scoped to `work_pool_name == "day_ahead_prices"` only, so it can never touch Production/Algos' deployments.
@@ -191,14 +191,6 @@ A Prefect flow only fails on a code exception — correct for genuine errors, bu
 - **Alerting**: `send_alert()` logs a warning listing the missing zones, then emails `sebastian@quent.dk` via `quent_core.utils.email_utils.send_email()` (AWS SES-backed, already used elsewhere for `info@quent.dk` alerts — no new plumbing needed). Deliberately a fixed personal recipient, not a team alias, per explicit request — revisit if this needs to reach more than one person. `send_email()` itself falls back to Teams if SES fails; a failure of *that* fallback too is caught here and logged rather than raised, so a broken alert channel can't fail the Prefect run.
 - **Not done yet**: no Prefect deployment/schedule created for this flow (same "design only" status as Scheduling).
 
-**`monitoring/coverage.py`** — Streamlit prototype (run with `poetry run streamlit run monitoring/coverage.py`), for eyeballing "which zone from which scraper is in already" without querying the DB by hand. Separate from the completeness check above, not a replacement for it: interactive/manual, per-**source** granularity, no deployment/alerting of its own.
-- Date picker for one delivery day at a time (default tomorrow), queries `PriceStore.get(market_type="DAY_AHEAD", ...)` for that day's UTC bounds, then groups results **by source** — each scraper gets its own block listing the zones it landed as chips, e.g. `OMIE` → `PT (96/96)`, `ES (96/96)`.
-- Chip counts are actual vs. **expected** settlement periods (delivery-day UTC span ÷ that row's own resolution, so 23h/25h DST transition days are handled for free) — a source that landed only *some* of a zone's periods shows amber/partial rather than looking identical to full coverage.
-- Grouped by `(source, bidding_zone, market)` before summing to actual/expected per zone, not straight to `(source, bidding_zone)` — GB lands as two separate `market` rows per source (N2EX hourly + GbHalfHour half-hourly) with different resolutions each; collapsing too early miscomputes `expected`.
-- `IN_SCOPE_ZONES` duplicated from `monitoring/day_ahead_completeness.py` rather than shared via `core/` — same reasoning as that module, now with a second consumer.
-- Sources are whatever `source` values actually appear that day, not a static per-zone expected list — a new source landing data shows up with no code change.
-- **Known limitation, by design for now**: reads `prod.prices` only, so it shows *whether* data is in, not *why* it's missing (a source erroring vs. simply not having published yet look identical) — e.g. SEMO/IE's day-later batch publish will show as red without being a real gap. A logs-based system with actual run/error status is a separate, later piece of work; this dashboard would plug into that as an additional data source.
-
 **`monitoring/zone_map/`** — standalone FastAPI + plain-JS map dashboard (run with
 `poetry run uvicorn monitoring.zone_map.app:app --reload`), not Streamlit — built to show
 coverage and price level geographically rather than as a chip/text list. Has its own day picker
@@ -226,12 +218,13 @@ curve chart, to stay minimal.
   reads faster than 96 numbers. Built from whichever `(source, market)` landed the most periods
   that zone/day ("primary", picked per-request - no fixed per-zone source priority exists yet,
   see Scheduling's "not yet decided" note).
-- `zones.py` mirrors `coverage.py`'s `by_market` groupby (source+market first, not straight to
-  source+zone) for the same GB mixed-resolution reason, then averages those per-source averages
-  for one headline "baseload" price per zone — avoids a naive row-mean letting GB's half-hourly
-  market (2x the row count of its hourly market) skew the number shown on the map.
-- `IN_SCOPE_ZONES` and `_day_bounds_utc()` duplicated again (3rd/5th copy respectively) — same
-  precedent as `coverage.py`/`day_ahead_completeness.py`.
+- `zones.py` groups by `(source, bidding_zone, market)` first, not straight to
+  `(source, bidding_zone)`, for the same GB mixed-resolution reason, then averages those
+  per-source averages for one headline "baseload" price per zone — avoids a naive row-mean
+  letting GB's half-hourly market (2x the row count of its hourly market) skew the number shown
+  on the map.
+- `IN_SCOPE_ZONES` and `_day_bounds_utc()` duplicated again — same precedent as
+  `day_ahead_completeness.py`.
 - Zone/context polygons are pre-built, static files (`static/geo/zones.geojson`,
   `static/geo/context.geojson`), not fetched live — `build_geo.py` is a one-off script (not run
   by the app) that combines `EnergieID/entsoe-py`'s per-bidding-zone shapes (MIT license; no
@@ -259,7 +252,7 @@ curve chart, to stay minimal.
 ## Open items
 
 - Migrate Nordpool to its gated v2 data portal — the free API's ~2-month rolling window is the main blocker to full backfill parity across all three main sources.
-- Intraday scrapers (IDA1-3 auctions, ID1/ID3/FULL VWAPs) — schema already supports this via `market`.
+- Intraday scrapers (IDA1-3 auctions, ID1/ID3/FULL VWAPs) — schema already supports this via `market`. `clients/epex/endpoints/ida2.py` is a BE-only IDA2 prototype (see Scope); IDA1/IDA3, other zones, and other sources still to do. Its `run()` cron isn't deployed yet — documented cron comment (`5,20,35,50 10-11 * * *` CET/CEST, 10:00 gate closure) is prepared in-repo only, same "not yet run against the server" status as everything else in Scheduling.
 - Market code reference/lookup table — only if free-text `market` values start causing problems; `id-tables-design.drawio` sketches an FK-based alternative (see Data model).
 - Day-ahead volumes alongside prices — needs a schema decision (extend `prod.prices` vs. separate table); currently out of scope.
 - CROPEX (HR), HUPX (HU), GME (IT), BSP Southpool (SI) — not started, blocked on paid/unconfirmed access (see Sources).

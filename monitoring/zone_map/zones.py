@@ -1,9 +1,10 @@
-"""per-zone DAY_AHEAD price summary for a delivery day, for the map dashboard's /api/prices.
+"""per-zone price summary for a delivery day, for the map dashboard's /api/prices - covers
+DAY_AHEAD (default) as well as intraday auctions like IDA2 (pass market_type/market).
 
-same query/grouping approach as monitoring/coverage.py's build_source_coverage(), extended with:
+groups by (source, bidding_zone, market) before summing to actual/expected per zone, extended with:
 - a headline "baseload" price per zone (mean price across the day's settlement periods - same
   thing EPEX's own market-results map calls "Baseload"), averaged across sources rather than a
-  straight row-mean, for the same GB mixed-resolution reason coverage.py already accounts for.
+  straight row-mean, for the GB mixed-resolution reason below.
 - a per-period price curve from whichever source landed the most periods that day ("primary"),
   for the hover detail table.
 """
@@ -19,9 +20,9 @@ from Database.db_connect import engine
 MARKET_TYPE = "DAY_AHEAD"
 DELIVERY_DAY_TZ = pytz.timezone("Europe/Copenhagen")
 
-# same 41-zone list as monitoring/day_ahead_completeness.py and monitoring/coverage.py,
-# duplicated rather than shared via core/ - consistent with those modules' own note to only
-# promote it once a need for real sharing (not just avoiding a 5th copy) shows up.
+# same 41-zone list as monitoring/day_ahead_completeness.py, duplicated rather than shared via
+# core/ - consistent with that module's own note to only promote it once a real need for
+# sharing shows up.
 IN_SCOPE_ZONES = [
     "AT", "BE", "BG", "CH", "CZ", "DE", "DK1", "DK2", "EE", "ES", "FI", "FR", "GB", "GR",
     "HR", "HU", "IE", "IT_NORD", "IT_CNOR", "IT_CSUD", "IT_SUD", "IT_SICI", "IT_SARD",
@@ -38,8 +39,12 @@ def _day_bounds_utc(date: dt.date) -> tuple[dt.datetime, dt.datetime]:
     return start, end
 
 
-def build_zone_summary(target_date: dt.date) -> dict[str, dict]:
+def build_zone_summary(target_date: dt.date, market_type: str = MARKET_TYPE, market: str | None = None) -> dict[str, dict]:
     """one entry per IN_SCOPE_ZONES, keyed by bidding_zone.
+
+    `market_type`/`market` select the view (e.g. DAY_AHEAD/None for the day-ahead baseload
+    across all its auctions, or INTRADAY/"IDA2" for just that auction) - passed straight through
+    to PriceStore.get(), which already supports filtering on both.
 
     headline `avg_price` ("baseload") is the mean of each (source, market)'s own average price,
     not a straight row-mean - GB lands two markets at different resolutions (N2EX hourly,
@@ -49,7 +54,7 @@ def build_zone_summary(target_date: dt.date) -> dict[str, dict]:
     """
     start, end = _day_bounds_utc(target_date)
     df = price_store.get(
-        market_type=MARKET_TYPE, from_valuetime=pd.Timestamp(start), to_valuetime=pd.Timestamp(end)
+        market_type=market_type, market=market, from_valuetime=pd.Timestamp(start), to_valuetime=pd.Timestamp(end)
     )
 
     summary = {

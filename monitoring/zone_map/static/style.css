@@ -1,10 +1,15 @@
 :root {
   --brand: #77bd46;
   --brand-dark: #5c9636;
-  --nodata-fill: #f3f1ea;
-  --nodead-stroke: #b8b2a0;
-  --context-fill: #dedcd3;
-  --context-stroke: #c9c6ba;
+  /* pending: in-scope zone, no rows landed yet for this day - kept close to the map's own
+     background tone (low fillOpacity in app.js on top of this) so it stays out of the way
+     rather than competing for attention with priced zones. */
+  --nodata-fill: #ece9de;
+  --nodead-stroke: #c7c3b5;
+  /* context: everything outside IN_SCOPE_ZONES - never scraped, much darker grey so the two
+     read as clearly different shades rather than two near-identical off-whites. */
+  --context-fill: #4d4b45;
+  --context-stroke: #38362f;
   --bg: #fbfaf7;
   --map-bg-inner: #f3f1ea;
   --map-bg-outer: #e9e6dc;
@@ -22,10 +27,10 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --brand-dark: #96d666;
-    --nodata-fill: #2a2a28;
-    --nodead-stroke: #45433c;
-    --context-fill: #212120;
-    --context-stroke: #2c2b28;
+    --nodata-fill: #232220;
+    --nodead-stroke: #302e29;
+    --context-fill: #121110;
+    --context-stroke: #1c1b18;
     --bg: #15150f;
     --map-bg-inner: #1c1c17;
     --map-bg-outer: #0f0f0c;
@@ -154,22 +159,6 @@ h1 {
   white-space: nowrap;
 }
 
-.swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  margin-right: 5px;
-  vertical-align: middle;
-  position: relative;
-  top: -1px;
-}
-
-.swatch.pending {
-  background: var(--nodata-fill);
-  border: 1px solid var(--nodead-stroke);
-}
-
 .price-scale {
   display: flex;
   align-items: center;
@@ -196,6 +185,82 @@ h1 {
 .leaflet-container {
   background: transparent;
   font-family: inherit;
+}
+
+/* ---------- auctions panel ---------- */
+
+/* floats top-left, just below the header - the zoom control is moved to topright (see app.js)
+   specifically to leave this corner free. */
+.auctions-panel {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 450;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  padding: 8px;
+  min-width: 168px;
+}
+
+.auctions-title {
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 2px 8px 6px;
+}
+
+.auction-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.auction-row:hover {
+  background: color-mix(in srgb, var(--brand) 15%, transparent);
+}
+
+.auction-row.active {
+  background: color-mix(in srgb, var(--brand) 24%, transparent);
+}
+
+.auction-light {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--nodead-stroke); /* pending */
+}
+
+.auction-light.partial { background: #fab219; }
+.auction-light.complete { background: #0ca30c; }
+
+.auction-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.auction-name {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.auction-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .loader {
@@ -310,7 +375,7 @@ h1 {
 /* card grows in place via the .expanded modifier (toggled by the expand button below) - it
    stays anchored to the same zone, Leaflet just repositions it around its new size. */
 .source-tooltip.expanded {
-  min-width: 380px;
+  min-width: 600px;
   padding: 22px 24px;
 }
 
@@ -409,7 +474,10 @@ h1 {
   margin-top: 4px;
 }
 
-.source-tooltip.expanded .curve-chart { height: 240px; margin-top: 12px; }
+/* expanded chart grows wider rather than taller - width matters more here (96 quarter-hour
+   periods need horizontal room), so height tracks width at a fixed 2:1 ratio instead of a
+   fixed px height that would just get proportionally taller as the card widens. */
+.source-tooltip.expanded .curve-chart { height: auto; aspect-ratio: 2 / 1; margin-top: 12px; }
 
 .chart-fill-a { stop-color: var(--brand); stop-opacity: 0.35; }
 .chart-fill-b { stop-color: var(--brand); stop-opacity: 0; }
@@ -427,6 +495,41 @@ h1 {
   stroke-width: 1;
   stroke-dasharray: 2, 2;
 }
+
+.chart-wrap {
+  position: relative;
+}
+
+.chart-hover-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--text-muted);
+  opacity: 0.55;
+  display: none;
+  pointer-events: none;
+}
+
+.chart-hover-label {
+  position: absolute;
+  top: 3px;
+  display: none;
+  white-space: nowrap;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 5px;
+  padding: 2px 6px;
+  font-size: 9.5px;
+  font-weight: 650;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.source-tooltip.expanded .chart-hover-label { font-size: 12px; padding: 3px 8px; top: 6px; }
 
 .chart-minmax {
   display: flex;

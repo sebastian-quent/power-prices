@@ -16,7 +16,7 @@ Checks, per (bidding_zone, market):
      no wildly-out-of-range prices.
 
 Delivery-day boundary uses Europe/Copenhagen, same anchor as every other cross-cutting script
-in this repo (monitoring/day_ahead_completeness.py, monitoring/coverage.py).
+in this repo (monitoring/day_ahead_completeness.py).
 """
 import datetime as dt
 import sys
