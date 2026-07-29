@@ -12,7 +12,7 @@
   <header>
     <div class="brand">
       <span class="brand-dot"></span>
-      <h1>EUROPEAN PRICES</h1>
+      <h1 id="page-title">EUROPEAN PRICES</h1>
     </div>
 
     <div class="day-picker">
@@ -22,10 +22,19 @@
     </div>
 
     <div class="legend">
-      <div class="price-scale">
+      <div class="view-toggle" id="view-toggle">
+        <button class="view-btn active" data-view="prices">Prices</button>
+        <button class="view-btn" data-view="coverage">Coverage</button>
+      </div>
+      <div class="price-scale" id="price-scale">
         <span id="scale-min"></span>
         <span class="scale-bar"></span>
         <span id="scale-max"></span>
+      </div>
+      <div class="coverage-scale" id="coverage-scale" hidden>
+        <span class="cov-dot cov-complete"></span>complete
+        <span class="cov-dot cov-partial"></span>partial
+        <span class="cov-dot cov-missing"></span>missing
       </div>
     </div>
   </header>

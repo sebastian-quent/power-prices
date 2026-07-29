@@ -5,8 +5,10 @@ sources and land them in a single, consistent Postgres table, so trading
 tooling has one place to query instead of per-source formats.
 
 Each bidding zone is covered by at least two independent sources for
-redundancy. Intraday prices are out of scope for now but the schema already
-supports them.
+redundancy. Day-ahead is the main scope, fully backfilled and covering all
+in-scope zones; intraday is early - two BE-only EPEX prototypes exist
+(`ida2.py` for the IDA2 auction, `vwap.py` for ID1/ID3/IDFULL VWAPs) ahead of
+being extended to other zones/sources or Prefect-deployed.
 
 ## Layout
 
@@ -44,6 +46,12 @@ behind paid access, see `project-overview.md`.
 31 of 35 in-scope zones have ≥2 live sources. HR, HU and SI are still on a
 single source (their local scraper isn't built yet); IT also has just one
 (ENTSO-E, split into 7 bidding-zone rows - GME would be its second, not built).
+
+**Intraday** (BE only, prototypes, not yet Prefect-deployed):
+
+- **EPEX IDA2** (`clients/epex/endpoints/ida2.py`) - Pan-European IDA2 auction
+- **EPEX VWAP** (`clients/epex/endpoints/vwap.py`) - ID1/ID3/IDFULL continuous
+  VWAP indices, backfilled to 2024-01-01
 
 ## Data
 

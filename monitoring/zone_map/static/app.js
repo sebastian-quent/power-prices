@@ -44,6 +44,11 @@ const MARKET_LABELS = { day_ahead: "day-ahead", ida2: "IDA2", id1: "ID1", id3: "
 // date picked in one view rarely makes sense carried over into the other.
 let currentMarket = "day_ahead";
 
+// "prices" (default) is the existing green->red price-intensity map; "coverage" is a quick
+// have-we-got-it-at-all overview - same map/zones/data, no extra API call, just a different
+// zoneStyle()/label reading of whatever /api/prices already returned (see selectView below).
+let currentView = "prices";
+
 function setActiveAuctionRow() {
   document.querySelectorAll(".auction-row").forEach((row) => {
     row.classList.toggle("active", row.dataset.market === currentMarket);
@@ -58,6 +63,21 @@ function selectMarket(market) {
   // only the startup default) - switching auctions must not jump the date back to that
   // auction's own default, so the currently selected date is passed through explicitly.
   loadPrices(document.getElementById("date-input").value);
+}
+
+// switching view is purely a re-render of whatever /api/prices already returned - no new fetch,
+// since coverage just reads the same has_data/sources fields the price view already has.
+function selectView(view) {
+  if (view === currentView) return;
+  currentView = view;
+  document.querySelectorAll(".view-btn").forEach((btn) => btn.classList.toggle("active", btn.dataset.view === view));
+  document.getElementById("page-title").textContent = view === "coverage" ? "COVERAGE" : "EUROPEAN PRICES";
+  document.getElementById("price-scale").hidden = view !== "prices";
+  document.getElementById("coverage-scale").hidden = view !== "coverage";
+  for (const [zoneCode, layer] of zoneLayers) {
+    layer.setStyle(zoneStyle(layer._priceInfo));
+    layer.setTooltipContent(zoneLabelHtml(zoneCode, layer._priceInfo));
+  }
 }
 
 function auctionRowHtml(a) {
@@ -132,7 +152,18 @@ function priceToColor(price) {
   return `rgb(${rgb.join(",")})`;
 }
 
-function zoneStyle(info) {
+// in-scope zone, just no rows landed yet for this day ("pending") - low fillOpacity keeps it
+// close to the map's own background so it doesn't compete for attention with priced zones,
+// while still reading as a distinct, lighter shade from the context layer's dark grey
+// (out-of-scope zones, see the context.geojson style() below). shared by both views.
+function noDataStyle() {
+  return {
+    fillColor: cssVar("--nodata-fill"), fillOpacity: 0.4,
+    color: cssVar("--nodead-stroke"), weight: 1,
+  };
+}
+
+function priceZoneStyle(info) {
   if (info && info.has_data && info.currency === SCALE_CURRENCY) {
     const fill = priceToColor(info.avg_price);
     return { fillColor: fill, fillOpacity: FILL_OPACITY, color: fill, weight: 1 };
@@ -143,14 +174,31 @@ function zoneStyle(info) {
     // either "cheap" or "no data".
     return { fillColor: cssVar("--noneur-fill"), fillOpacity: 0.85, color: cssVar("--noneur-stroke"), weight: 1 };
   }
-  // in-scope zone, just no rows landed yet for this day ("pending") - low fillOpacity keeps it
-  // close to the map's own background so it doesn't compete for attention with priced zones,
-  // while still reading as a distinct, lighter shade from the context layer's dark grey
-  // (out-of-scope zones, see the context.geojson style() below).
-  return {
-    fillColor: cssVar("--nodata-fill"), fillOpacity: 0.4,
-    color: cssVar("--nodead-stroke"), weight: 1,
-  };
+  return noDataStyle();
+}
+
+// zone counts as fully "in" once at least one of its sources landed every settlement period
+// expected for the day - a second, incomplete source doesn't drag a zone with one complete
+// source back down to partial, consistent with the ≥1-live-source redundancy framing used
+// everywhere else in this project (see project-overview.md Goal/Monitoring).
+function zoneCoverage(info) {
+  if (!info || !info.has_data) return "missing";
+  return info.sources.some((s) => s.actual >= s.expected) ? "complete" : "partial";
+}
+
+function coverageZoneStyle(info) {
+  const coverage = zoneCoverage(info);
+  if (coverage === "missing") return noDataStyle();
+  if (coverage === "complete") {
+    const fill = cssVar("--brand");
+    return { fillColor: fill, fillOpacity: 0.4, color: fill, weight: 1 };
+  }
+  const fill = "#fab219"; // same amber used for "partial" elsewhere (auction light, source dot)
+  return { fillColor: fill, fillOpacity: 0.55, color: fill, weight: 1 };
+}
+
+function zoneStyle(info) {
+  return currentView === "coverage" ? coverageZoneStyle(info) : priceZoneStyle(info);
 }
 
 function formatPrice(info) {
@@ -159,7 +207,9 @@ function formatPrice(info) {
 }
 
 function zoneLabelHtml(zoneCode, info) {
-  const price = formatPrice(info);
+  // coverage view is a quick have-we-got-it check, not a price readout - price stays hidden
+  // there even when available, so the chip doesn't compete with the green/orange/grey fill.
+  const price = currentView === "prices" ? formatPrice(info) : null;
   return `<div class="zone-chip"><span class="zone-code">${zoneCode}</span>${price ? `<span class="price">${price}</span>` : ""}</div>`;
 }
 
@@ -450,6 +500,10 @@ async function main() {
   document.getElementById("prev-day").addEventListener("click", () => loadPrices(shiftDate(dateInput.value, -1)));
   document.getElementById("next-day").addEventListener("click", () => loadPrices(shiftDate(dateInput.value, 1)));
   dateInput.addEventListener("change", () => loadPrices(dateInput.value));
+
+  document.querySelectorAll(".view-btn").forEach((btn) => {
+    btn.addEventListener("click", () => selectView(btn.dataset.view));
+  });
 
   const loader = document.getElementById("loader");
   if (loader) {

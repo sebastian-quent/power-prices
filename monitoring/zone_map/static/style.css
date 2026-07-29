@@ -159,12 +159,67 @@ h1 {
   white-space: nowrap;
 }
 
+.view-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--nodata-fill);
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  padding: 3px;
+}
+
+.view-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.view-btn:hover {
+  color: var(--text);
+}
+
+.view-btn.active {
+  background: var(--brand);
+  color: #fff;
+}
+
 .price-scale {
   display: flex;
   align-items: center;
   gap: 6px;
   font-variant-numeric: tabular-nums;
 }
+
+.coverage-scale {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.coverage-scale .cov-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-left: 10px;
+}
+
+.coverage-scale .cov-dot:first-child {
+  margin-left: 0;
+}
+
+.cov-dot.cov-complete { background: var(--brand); }
+.cov-dot.cov-partial { background: #fab219; }
+.cov-dot.cov-missing { background: var(--nodead-stroke); }
 
 .scale-bar {
   width: 72px;
