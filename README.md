@@ -1,4 +1,4 @@
-# day-ahead-prices
+# power-prices
 
 Scrapers that collect European day-ahead electricity prices from multiple
 sources and land them in a single, consistent Postgres table, so trading

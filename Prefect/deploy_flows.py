@@ -16,7 +16,7 @@ from prefect import flow
 from prefect.client.orchestration import get_client
 from prefect.schedules import Cron
 
-WORK_POOL_NAME = "day_ahead_prices"
+WORK_POOL_NAME = "power-prices"
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

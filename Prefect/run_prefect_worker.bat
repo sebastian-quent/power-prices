@@ -2,11 +2,11 @@
 setlocal EnableExtensions DisableDelayedExpansion
 
 rem Adjust REPO_ROOT if this repo is cloned to a different path on the server.
-set "REPO_ROOT=C:\Users\Administrator\Documents\GitHub\day_ahead_prices"
+set "REPO_ROOT=C:\Users\Administrator\Documents\GitHub\power-prices"
 set "PREFECT_DIR=%REPO_ROOT%\Prefect"
 set "POETRY_EXE=%APPDATA%\Python\Scripts\poetry.exe"
 set "WORKER_LIMIT=3"
-set "POOL_NAME=day_ahead_prices"
+set "POOL_NAME=power-prices"
 
 set "LOG_DIR=%PREFECT_DIR%\logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1

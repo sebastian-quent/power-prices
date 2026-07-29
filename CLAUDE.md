@@ -1,4 +1,4 @@
-# day-ahead-prices
+# power-prices
 
 See @project-overview.md for scope, architecture, and iteration plan.
 
