@@ -78,6 +78,12 @@ def fetch_file(remote_path: str) -> Optional[bytes]:
     return _with_retry(lambda sftp: sftp.open(remote_path, "rb").read(), remote_path)
 
 
+def list_dir(remote_dir: str) -> Optional[list]:
+    """list filenames in a remote SFTP directory - needed where a filename embeds an
+    unpredictable publish timestamp and can't be constructed directly (see vwap.py)."""
+    return _with_retry(lambda sftp: sftp.listdir(remote_dir), remote_dir)
+
+
 def stat_mtime(remote_path: str) -> Optional[pd.Timestamp]:
     """last-modified time of a remote file, used as forecasttime for the data it holds."""
     return _with_retry(lambda sftp: pd.to_datetime(sftp.stat(remote_path).st_mtime, unit="s", utc=True), remote_path)

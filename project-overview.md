@@ -9,7 +9,7 @@ Redundancy requirement: at least **two independent sources per bidding zone**, s
 ## Scope
 
 - In scope: day-ahead auction prices (`DAY_AHEAD`), all bidding zones listed below, historical backfill (2024-01-01 onward — see Historical backfill), Prefect-scheduled runs with logging.
-- Later, not now: intraday (`INTRADAY`) scrapers. Schema already supports it (see Data model). One early prototype exists ahead of the rest: `clients/epex/endpoints/ida2.py` scrapes EPEX's Pan-European IDA2 auction for BE only (test case) — not yet extended to other zones, not yet Prefect-deployed.
+- Later, not now: intraday (`INTRADAY`) scrapers. Schema already supports it (see Data model). Two early prototypes exist ahead of the rest, both BE only (test case), neither yet extended to other zones or Prefect-deployed: `clients/epex/endpoints/ida2.py` scrapes EPEX's Pan-European IDA2 auction; `clients/epex/endpoints/vwap.py` scrapes EPEX's intraday continuous VWAP indices (`ID1`/`ID3`/`IDFULL`) from the SFTP's per-day current-year files or per-year historical zips.
 - Out of scope: anything not price-related (volumes, nominations, flows, imbalance prices) — stays in existing scraper setups.
 
 ## Architecture
@@ -148,6 +148,8 @@ Verified with `scripts/verify_backfill.py` — a day-by-day gap scan across all 
 
 **Resolution change (October 2025)**: many zones moved 60-min → 15-min settlement then, so backfilled 2024 rows are labeled `resolution=60` for those zones, not the current value. ENTSO-E/OPCOM/OMIE/OKTE derive `resolution` dynamically per response, safe by construction; EPEX's historical-resolution fallback (see EPEX above) handles it explicitly.
 
+**EPEX VWAP (2026-07-29)**: `clients/epex/endpoints/vwap.py` backfilled BE to **2024-01-01** (real floor — the SFTP's historical zips reach back that far cleanly, unlike the day-ahead per-source floors above), one-off run, not via `scripts/backfill_2024.py`. Verified day-by-day (same approach as `scripts/verify_backfill.py`, adapted for `INTRADAY`/15-min): 940/940 days present, no partial days, for all three markets (`ID1`, `ID3`, `IDFULL`).
+
 ## Scheduling
 
 Deployment scripts prepared in-repo, not yet run against the server (see Open items). Captured here because the grouping/catch-up/redundancy decisions are non-obvious and worth settling before wiring up Prefect deployments.
@@ -252,7 +254,7 @@ curve chart, to stay minimal.
 ## Open items
 
 - Migrate Nordpool to its gated v2 data portal — the free API's ~2-month rolling window is the main blocker to full backfill parity across all three main sources.
-- Intraday scrapers (IDA1-3 auctions, ID1/ID3/FULL VWAPs) — schema already supports this via `market`. `clients/epex/endpoints/ida2.py` is a BE-only IDA2 prototype (see Scope); IDA1/IDA3, other zones, and other sources still to do. Its `run()` cron isn't deployed yet — documented cron comment (`5,20,35,50 10-11 * * *` CET/CEST, 10:00 gate closure) is prepared in-repo only, same "not yet run against the server" status as everything else in Scheduling.
+- Intraday scrapers (IDA1-3 auctions, ID1/ID3/FULL VWAPs) — schema already supports this via `market`. `clients/epex/endpoints/ida2.py` (BE-only IDA2 prototype) and `clients/epex/endpoints/vwap.py` (BE-only ID1/ID3/IDFULL VWAP prototype, backfilled to 2024-01-01, see Historical backfill) are the two prototypes so far (see Scope); IDA1/IDA3, other zones, and other sources still to do. ida2.py's documented cron comment (`5,20,35,50 10-11 * * *` CET/CEST, 10:00 gate closure) is now registered in `Prefect/deploy_flows.py`. vwap.py's catch-up cron is now finalized (`5,20,35,50 0-3 * * *` CET/CEST, ~4h window anchored just after midnight so `run()`'s "yesterday" default resolves correctly against both the summer same-evening publish and the winter shortly-after-midnight publish — see the code comment above `vwap.py`'s `run()`) and registered in `Prefect/deploy_flows.py` — same "not yet run against the server" status as everything else in Scheduling, since the `day_ahead_prices` work pool doesn't exist yet.
 - Market code reference/lookup table — only if free-text `market` values start causing problems; `id-tables-design.drawio` sketches an FK-based alternative (see Data model).
 - Day-ahead volumes alongside prices — needs a schema decision (extend `prod.prices` vs. separate table); currently out of scope.
 - CROPEX (HR), HUPX (HU), GME (IT), BSP Southpool (SI) — not started, blocked on paid/unconfirmed access (see Sources).

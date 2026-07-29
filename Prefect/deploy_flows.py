@@ -128,6 +128,20 @@ def deploy_all():
         tags=["enex", "day_ahead"],
     )
 
+    # EPEX intraday IDA2
+    deploy_flow(
+        entrypoint="clients/epex/endpoints/ida2.py:run",
+        cron="5,20,35,50 10-11 * * *",
+        tags=["epex", "intraday", "ida2"],
+    )
+
+    # EPEX intraday VWAP
+    deploy_flow(
+        entrypoint="clients/epex/endpoints/vwap.py:run",
+        cron="5,20,35,50 0-3 * * *",
+        tags=["epex", "intraday", "vwap"],
+    )
+
     # Monitoring
     deploy_flow(
         entrypoint="monitoring/day_ahead_completeness.py:run",

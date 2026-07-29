@@ -1,5 +1,6 @@
 """map dashboard: European bidding zones, colored once an auction's price has landed - covers
-day-ahead and (so far) EPEX's IDA2 intraday auction, see MARKET_OPTIONS.
+day-ahead, EPEX's IDA2 intraday auction, and EPEX's ID1/ID3/IDFULL intraday continuous VWAP
+indices, see MARKET_OPTIONS.
 
 run with: poetry run uvicorn monitoring.zone_map.app:app --reload
 """
@@ -13,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
 from clients.epex.endpoints.ida2 import ZONE_FILE_CONFIG as IDA2_ZONES
+from clients.epex.endpoints.vwap import ZONE_FILE_CONFIG as VWAP_ZONES
 from monitoring.zone_map.zones import IN_SCOPE_ZONES, build_zone_summary
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -36,6 +38,21 @@ MARKET_OPTIONS = {
     "ida2": {
         "market_type": "INTRADAY", "market": "IDA2", "default_offset_days": 0,
         "label": "IDA2", "clears": "10:00 CET/CEST", "zones": list(IDA2_ZONES),
+    },
+    # ID1/ID3/IDFULL are EOD continuous-trading VWAP indices (see clients/epex/endpoints/vwap.py),
+    # not auctions - not published until the delivery day's continuous trading has fully closed,
+    # so (unlike day-ahead/IDA2) they default to yesterday's delivery day rather than today/tomorrow.
+    "id1": {
+        "market_type": "INTRADAY", "market": "ID1", "default_offset_days": -1,
+        "label": "ID1", "clears": "EOD, ~22:40-23:20 CET/CEST", "zones": list(VWAP_ZONES),
+    },
+    "id3": {
+        "market_type": "INTRADAY", "market": "ID3", "default_offset_days": -1,
+        "label": "ID3", "clears": "EOD, ~22:40-23:20 CET/CEST", "zones": list(VWAP_ZONES),
+    },
+    "idfull": {
+        "market_type": "INTRADAY", "market": "IDFULL", "default_offset_days": -1,
+        "label": "IDFULL", "clears": "EOD, ~22:40-23:20 CET/CEST", "zones": list(VWAP_ZONES),
     },
 }
 

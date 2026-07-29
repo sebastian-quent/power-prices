@@ -20,7 +20,7 @@ SOURCE = "EPEX"
 MARKET_TYPE = "INTRADAY"
 MARKET = "IDA2"
 DEFAULT_CURRENCY = "EUR"
-RESOLUTION_MINUTES = 15  # Pan-European IDA2 is quarter-hourly from inception - no hourly fallback like day-ahead needs
+RESOLUTION_MINUTES = 15
 
 OUTPUT_DIR = Path("output/epex/ida2")
 
@@ -32,10 +32,7 @@ class ZoneFile(NamedTuple):
     filename_slug: str  # filename segment, e.g. "belgium"
 
 
-# per-zone SFTP file layout under "<folder>/Intraday Auction/Pan-European IDA2/...".
-# only BE wired up for now (test case, see project-overview.md) - other Pan-European IDA2
-# zones can be added once their folder/filename_slug is confirmed against the SFTP server;
-# not assumed to necessarily match day_ahead.py's ZONE_FILE_CONFIG folder names.
+# TODO: expand eventually to all EPEX bidding zones
 ZONE_FILE_CONFIG = {
     "BE": ZoneFile("belgium", "belgium"),
 }
@@ -120,8 +117,8 @@ def parse_csv(content: bytes, bidding_zone: str, forecasttime: pd.Timestamp) -> 
 def fetch_and_parse(bidding_zones: list, from_date: dt.date, to_date: dt.date) -> pd.DataFrame:
     """fetch, parse, and dump EPEX Pan-European IDA2 prices one zone at a time.
 
-    dumping per zone (rather than once for the whole batch) means a single zone's SFTP fetch,
-    parse, or dump failure only costs that zone - mirrors day_ahead.py's fetch_and_parse.
+    dumping per zone means a single zone's SFTP fetch, parse, or dump failure
+    only costs that zone - mirrors day_ahead.py's fetch_and_parse.
     """
     years = sorted(set(range(from_date.year, to_date.year + 1)))
     window_start, _ = _day_bounds_utc(from_date)
@@ -171,20 +168,15 @@ def dump(df: pd.DataFrame) -> None:
     logger.info("PriceStore.dump: wrote %d row(s) for EPEX IDA2", written)
 
 
-# IDA2 is a same-day SIDC auction (not day-ahead) - gate closure 10:00 CET/CEST on the
-# delivery day itself, clearing near-instantly and publishing the whole day's 96 quarter-hour
-# slots at once. Catch-up starts 5 min after gate closure, same pattern as SEMO's offset cron:
-# cron: 5,20,35,50 10-11 * * *  (CET/CEST)
 @flow
 def run(
     bidding_zones: Optional[list] = None, from_date: Optional[dt.date] = None, to_date: Optional[dt.date] = None
 ) -> pd.DataFrame:
     """fetch EPEX Pan-European IDA2 intraday auction prices and dump to prod.prices.
 
-    bidding_zones optional, defaults to every zone in ZONE_FILE_CONFIG - only BE is wired
-    up for now (test case), more zones to follow once their SFTP folder layout is confirmed.
+    bidding_zones optional, defaults to every zone in ZONE_FILE_CONFIG
     from_date/to_date optional for historical backfill; defaults to today only - IDA2 publishes
-    same-day (gate closure 10:00 CET/CEST on the delivery day), unlike day-ahead's tomorrow default.
+    same-day (gate closure 10:00 CET/CEST on the delivery day).
     """
     setup_logging()
     today = dt.date.today()

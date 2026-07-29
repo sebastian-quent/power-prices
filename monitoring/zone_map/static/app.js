@@ -37,7 +37,7 @@ let hoverTooltip = null;
 let closeTimer = null;
 
 // display label for the empty-note in the hover card only - mirrors app.py's MARKET_OPTIONS keys
-const MARKET_LABELS = { day_ahead: "day-ahead", ida2: "IDA2" };
+const MARKET_LABELS = { day_ahead: "day-ahead", ida2: "IDA2", id1: "ID1", id3: "ID3", idfull: "IDFULL" };
 
 // mirrors app.py's MARKET_OPTIONS keys - switching market always drops any explicit date so the
 // backend's own per-market default kicks in (tomorrow for day-ahead, today for IDA2), since a
