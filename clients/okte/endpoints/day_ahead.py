@@ -23,17 +23,6 @@ DEFAULT_CURRENCY = "EUR"
 OUTPUT_DIR = Path("output/okte/day_ahead")
 
 
-def fetch_day_ahead_prices(from_date: dt.date, to_date: dt.date) -> Optional[list]:
-    """fetch OKTE DAM (day-ahead) results for SK across a whole date range in one call."""
-    return okte_fetch(
-        "dam/results",
-        {
-            "deliveryDayFrom": from_date.isoformat(),
-            "deliveryDayTo": to_date.isoformat(),
-        },
-    )
-
-
 def parse_response(items: list, forecasttime: pd.Timestamp) -> pd.DataFrame:
     """parse OKTE DAM results into prod.prices-shaped rows for SK."""
     rows = []
@@ -60,7 +49,13 @@ def parse_response(items: list, forecasttime: pd.Timestamp) -> pd.DataFrame:
 def fetch_and_parse(from_date: dt.date, to_date: dt.date) -> pd.DataFrame:
     forecasttime = pd.Timestamp.now(tz="UTC")
 
-    items = fetch_day_ahead_prices(from_date, to_date)
+    items = okte_fetch(
+        "dam/results",
+        {
+            "deliveryDayFrom": from_date.isoformat(),
+            "deliveryDayTo": to_date.isoformat(),
+        },
+    )
     if not items:
         logger.warning("skipping OKTE %s to %s: no data returned", from_date, to_date)
         return pd.DataFrame()

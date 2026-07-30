@@ -29,18 +29,6 @@ RESOLUTION_MINUTES = {"PT15M": 15, "PT30M": 30, "PT60M": 60}
 DELIVERY_DAY_TZ = pytz.timezone("Europe/Prague")
 
 
-def fetch_day_ahead_prices(from_date: dt.date, to_date: dt.date) -> Optional[list]:
-    """fetch OTE day-ahead auction prices (GetDamPricePeriodE) for CZ across a whole date range in one call."""
-    return ote_fetch(
-        "GetDamPricePeriodE",
-        {
-            "StartDate": from_date.isoformat(),
-            "EndDate": to_date.isoformat(),
-            "PeriodResolution": REQUEST_RESOLUTION,
-        },
-    )
-
-
 def parse_response(items: list, forecasttime: pd.Timestamp) -> pd.DataFrame:
     """parse OTE day-ahead price items into prod.prices-shaped rows.
 
@@ -84,7 +72,14 @@ def parse_response(items: list, forecasttime: pd.Timestamp) -> pd.DataFrame:
 def fetch_and_parse(from_date: dt.date, to_date: dt.date) -> pd.DataFrame:
     forecasttime = pd.Timestamp.now(tz="UTC")
 
-    items = fetch_day_ahead_prices(from_date, to_date)
+    items = ote_fetch(
+        "GetDamPricePeriodE",
+        {
+            "StartDate": from_date.isoformat(),
+            "EndDate": to_date.isoformat(),
+            "PeriodResolution": REQUEST_RESOLUTION,
+        },
+    )
     if not items:
         logger.warning("skipping OTE %s to %s: no data returned", from_date, to_date)
         return pd.DataFrame()

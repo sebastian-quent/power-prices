@@ -21,6 +21,7 @@ in this repo (monitoring/day_ahead_completeness.py).
 import datetime as dt
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -37,10 +38,18 @@ FROM_DATE = dt.date(2024, 1, 1)
 TO_DATE = dt.date.today() - dt.timedelta(days=1)
 DELIVERY_DAY_TZ = pytz.timezone("Europe/Copenhagen")
 
-VALID_RESOLUTIONS = {15, 30, 60}
 # EUR/MWh day-ahead prices occasionally go deeply negative (oversupply) or spike during scarcity,
 # but a value outside this band is more likely a parsing/unit bug than a real clearing price.
 PRICE_SANITY_MIN, PRICE_SANITY_MAX = -1000, 5000
+
+
+class CorrectnessIssue(NamedTuple):
+    bidding_zone: str
+    market: str
+    day: dt.date
+    null_count: int
+    bad_resolution_count: int
+    bad_price_count: int
 
 AGGREGATE_SQL = text(
     """
@@ -139,8 +148,8 @@ def build_reports(from_date: dt.date = FROM_DATE, to_date: dt.date = TO_DATE) ->
 
             if row["null_count"] or row["bad_resolution_count"] or row["bad_price_count"]:
                 correctness_issues.append(
-                    (zone, row["market"], row["local_day"], int(row["null_count"]),
-                     int(row["bad_resolution_count"]), int(row["bad_price_count"]))
+                    CorrectnessIssue(zone, row["market"], row["local_day"], int(row["null_count"]),
+                                      int(row["bad_resolution_count"]), int(row["bad_price_count"]))
                 )
 
         first_day = min(zone_days_present)

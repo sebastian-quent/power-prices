@@ -250,13 +250,7 @@ def main():
             logger.info("=== finished backfill: %s ===", name)
     logger.info("=== all backfills complete - verifying against prod.prices (not just trusting exit code 0) ===")
 
-    # each backfill call above catches and logs its own fetch failures per chunk rather than
-    # raising, so a clean run through BACKFILLS is NOT proof of complete data - a transient
-    # fetch failure (SFTP hiccup, ENTSO-E timeout/throttling under concurrency) can silently
-    # drop a whole zone/year with no non-zero exit code. Found live 2026-07-22: NO1/NO2 lost
-    # ~9 months this way and the run still "succeeded" - see project-overview.md > Known gaps.
-    # verify_backfill.py's gap scan (existence + full settlement-period count per day, not
-    # MIN/MAX) is the only reliable completeness signal.
+    # a clean run through BACKFILLS is NOT proof of complete data - see project-overview.md > Known gaps (NO1/NO2 incident)
     zone_reports, correctness_issues = build_reports()
     all_clean = print_report(zone_reports, correctness_issues)
     if all_clean:

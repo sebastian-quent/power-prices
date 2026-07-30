@@ -77,13 +77,17 @@ def _day_bounds_utc(date: dt.date) -> tuple:
     return start, end
 
 
-def _convert_subhour_to_timestamp(date: pd.Timestamp, slot: str, resolution_minutes: int) -> pd.Timestamp:
-    """"Hour 3 Q2" -> that sub-hourly slot's start, handling the DST-ambiguous "Hour 3A"/"3B" columns.
+def _convert_slot_to_timestamp(date: pd.Timestamp, slot: str, resolution_minutes: int) -> pd.Timestamp:
+    """"Hour 3 Q2" (or plain "Hour 3" for hourly files) -> that slot's start, handling the
+    DST-ambiguous "Hour 3A"/"3B" columns.
 
-    Covers both quarter-hourly (15 min/slot) and half-hourly (30 min/slot) files - the slot
-    index within the hour (Q1, Q2, ...) is scaled by resolution_minutes.
+    Covers hourly, quarter-hourly (15 min/slot), and half-hourly (30 min/slot) files - the
+    slot index within the hour (Q1, Q2, ...) is scaled by resolution_minutes; hourly slots
+    have no sub-hour index and default to 0.
     """
-    _, hour_str, quarter_str = slot.split(" ")
+    parts = slot.split(" ")
+    hour_str = parts[1]
+    slot_index = int(parts[2][1]) - 1 if len(parts) > 2 else 0
     if hour_str == "3A":
         hour, ambiguous = 2, True  # CEST (spring/summer)
     elif hour_str == "3B":
@@ -91,22 +95,7 @@ def _convert_subhour_to_timestamp(date: pd.Timestamp, slot: str, resolution_minu
     else:
         hour, ambiguous = int(hour_str) - 1, "raise"
 
-    slot_index = int(quarter_str[1]) - 1
     naive = pd.Timestamp(date) + pd.Timedelta(hours=hour) + pd.Timedelta(minutes=slot_index * resolution_minutes)
-    return naive.tz_localize(tz="Europe/Copenhagen", ambiguous=ambiguous)
-
-
-def _convert_hour_to_timestamp(date: pd.Timestamp, slot: str) -> pd.Timestamp:
-    """"Hour 3" -> that hour's start, handling the DST-ambiguous "Hour 3A"/"3B" columns."""
-    hour_str = slot.split()[1]
-    if hour_str == "3A":
-        hour, ambiguous = 2, True  # CEST (spring/summer)
-    elif hour_str == "3B":
-        hour, ambiguous = 2, False  # CET (winter)
-    else:
-        hour, ambiguous = int(hour_str) - 1, "raise"
-
-    naive = pd.Timestamp(date) + pd.Timedelta(hours=hour)
     return naive.tz_localize(tz="Europe/Copenhagen", ambiguous=ambiguous)
 
 
@@ -170,10 +159,7 @@ def parse_csv(content: bytes, bidding_zone: str, zone: ZoneFile, resolution_minu
     df = df.unstack().rename("price").reset_index()
     df = df.loc[df["price"].notnull()]
 
-    if resolution_minutes == 60:
-        convert = _convert_hour_to_timestamp
-    else:
-        convert = partial(_convert_subhour_to_timestamp, resolution_minutes=resolution_minutes)
+    convert = partial(_convert_slot_to_timestamp, resolution_minutes=resolution_minutes)
     valuetime = df.apply(lambda row: convert(row["Date"], row["slot"]), axis=1).dt.tz_convert("UTC")
 
     df = df.assign(

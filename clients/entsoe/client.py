@@ -1,7 +1,6 @@
 import ast
 import logging
 import time
-from functools import lru_cache
 from typing import Optional
 
 import requests
@@ -12,16 +11,8 @@ logger = logging.getLogger(__name__)
 RETRY_ATTEMPTS = 2
 RETRY_BACKOFF_SECONDS = 10
 
-
-@lru_cache(maxsize=1)
-def _get_host() -> str:
-    return load_setting("entsoe.host", resolve_secret=False)
-
-
-@lru_cache(maxsize=1)
-def _get_api_key() -> str:
-    raw_api_keys = load_setting("entsoe.api_key", resolve_secret=True)
-    return ast.literal_eval(raw_api_keys)[0]
+_host: Optional[str] = None
+_api_key: Optional[str] = None
 
 
 def fetch(params: dict) -> Optional[bytes]:
@@ -33,10 +24,17 @@ def fetch(params: dict) -> Optional[bytes]:
     retries once after a fixed backoff on any request failure, then returns None
     so callers can skip/continue instead of crashing the run.
     """
-    request_params = {"securityToken": _get_api_key(), **params}
+    global _host, _api_key
+    if _host is None:
+        _host = load_setting("entsoe.host", resolve_secret=False)
+    if _api_key is None:
+        raw_api_keys = load_setting("entsoe.api_key", resolve_secret=True)
+        _api_key = ast.literal_eval(raw_api_keys)[0]
+
+    request_params = {"securityToken": _api_key, **params}
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
-            response = requests.get(_get_host(), params=request_params, timeout=30)
+            response = requests.get(_host, params=request_params, timeout=30)
             response.raise_for_status()
             return response.content
         except requests.RequestException as exc:

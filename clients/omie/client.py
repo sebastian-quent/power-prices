@@ -18,18 +18,17 @@ RETRY_ATTEMPTS = 2
 RETRY_BACKOFF_SECONDS = 10
 
 
-def _filename_pattern(realdir: str) -> re.Pattern:
-    return re.compile(rf"^{re.escape(realdir)}_(\d{{8}})\.\d+$")
+REQUEST_TIMEOUT_SECONDS = 30
 
 
-def _get(url: str, params: dict, timeout: int = 30) -> Optional[requests.Response]:
+def _get(url: str, params: dict) -> Optional[requests.Response]:
     """GET with one retry on failure, shared by list_files and download_file.
 
     public, unauthenticated file browser.
     """
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
-            response = requests.get(url, params=params, timeout=timeout)
+            response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
             response.raise_for_status()
             return response
         except requests.RequestException as exc:
@@ -42,7 +41,6 @@ def _get(url: str, params: dict, timeout: int = 30) -> Optional[requests.Respons
             else:
                 logger.error("OMIE request to %s failed after %d attempt(s)", url, RETRY_ATTEMPTS, exc_info=True)
                 return None
-    return None
 
 
 def list_files(realdir: str, dir_label: str, parents: str) -> Optional[dict[dt.date, tuple[str, pd.Timestamp]]]:
@@ -60,7 +58,7 @@ def list_files(realdir: str, dir_label: str, parents: str) -> Optional[dict[dt.d
     if response is None:
         return None
 
-    pattern = _filename_pattern(realdir)
+    pattern = re.compile(rf"^{re.escape(realdir)}_(\d{{8}})\.\d+$")
     tree = html.fromstring(response.content)
     files: dict[dt.date, tuple[str, pd.Timestamp]] = {}
     for row in tree.xpath("//tr[td]"):
@@ -76,7 +74,7 @@ def list_files(realdir: str, dir_label: str, parents: str) -> Optional[dict[dt.d
     return files
 
 
-def download_file(realdir: str, filename: str, timeout: int = 30) -> Optional[bytes]:
+def download_file(realdir: str, filename: str) -> Optional[bytes]:
     """download the raw content of one published OMIE file."""
-    response = _get(DOWNLOAD_URL, params={"parents": realdir, "filename": filename}, timeout=timeout)
+    response = _get(DOWNLOAD_URL, params={"parents": realdir, "filename": filename})
     return response.content if response is not None else None

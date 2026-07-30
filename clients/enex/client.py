@@ -29,14 +29,17 @@ _TITLE_PATTERN = re.compile(r"(\d{8})_EL-DAM_Results_EN_v\d+")
 _UUID_PATTERN = re.compile(r"uuid=([a-f0-9-]+)")
 
 
-def _get(url: str, params: Optional[dict] = None, timeout: int = 30) -> Optional[requests.Response]:
+REQUEST_TIMEOUT_SECONDS = 30
+
+
+def _get(url: str, params: Optional[dict] = None) -> Optional[requests.Response]:
     """GET with one retry on failure, shared by list_files and download_file.
 
     public, unauthenticated Liferay site - no auth/UA workaround needed
     """
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
-            response = requests.get(url, params=params, timeout=timeout)
+            response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
             response.raise_for_status()
             return response
         except requests.RequestException as exc:
@@ -49,7 +52,6 @@ def _get(url: str, params: Optional[dict] = None, timeout: int = 30) -> Optional
             else:
                 logger.error("ENEX request to %s failed after %d attempt(s)", url, RETRY_ATTEMPTS, exc_info=True)
                 return None
-    return None
 
 
 def list_files(oldest_date: dt.date) -> Optional[dict[dt.date, str]]:
@@ -90,7 +92,7 @@ def list_files(oldest_date: dt.date) -> Optional[dict[dt.date, str]]:
     return files
 
 
-def download_file(uuid: str, timeout: int = 30) -> Optional[bytes]:
+def download_file(uuid: str) -> Optional[bytes]:
     """download the raw xlsx content of one published EL-DAM_Results document."""
-    response = _get(DOWNLOAD_URL, params={"uuid": uuid, "groupId": "20126"}, timeout=timeout)
+    response = _get(DOWNLOAD_URL, params={"uuid": uuid, "groupId": "20126"})
     return response.content if response is not None else None

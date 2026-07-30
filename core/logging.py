@@ -9,8 +9,7 @@ _configured = False
 def setup_logging(level: int = logging.INFO) -> None:
     """configure the root logger once: single stdout handler, timestamp/level/module format.
 
-    call at the top of each endpoint's run(). idempotent - later calls are no-ops, so
-    it's safe to call from multiple entrypoints in the same process.
+    idempotent - safe to call from multiple entrypoints in the same process.
     """
     global _configured
     if _configured:

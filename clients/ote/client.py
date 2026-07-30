@@ -1,6 +1,5 @@
 import logging
 import time
-from functools import lru_cache
 from typing import Optional
 
 import requests
@@ -16,10 +15,7 @@ WSDL = "https://www.ote-cr.cz/services/PublicDataService?wsdl"
 RETRY_ATTEMPTS = 2
 RETRY_BACKOFF_SECONDS = 10
 
-
-@lru_cache(maxsize=1)
-def _get_client() -> zeep.Client:
-    return zeep.Client(wsdl=WSDL, transport=Transport(session=Session()))
+_client: Optional[zeep.Client] = None
 
 
 def fetch(operation: str, params: dict) -> Optional[list]:
@@ -30,7 +26,10 @@ def fetch(operation: str, params: dict) -> Optional[list]:
     them, or None if the source returned nothing or the request failed after
     retrying once.
     """
-    method = getattr(_get_client().service, operation)
+    global _client
+    if _client is None:
+        _client = zeep.Client(wsdl=WSDL, transport=Transport(session=Session()))
+    method = getattr(_client.service, operation)
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
             return serialize_object(method(**params))

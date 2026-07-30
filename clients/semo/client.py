@@ -16,14 +16,17 @@ RETRY_BACKOFF_SECONDS = 10
 MAX_PAGES = 50  # safety cap; SEMO's static-reports listing is paginated
 
 
-def _get(url: str, params: Optional[dict[str, Any]] = None, timeout: int = 30) -> Optional[requests.Response]:
+REQUEST_TIMEOUT_SECONDS = 30
+
+
+def _get(url: str, params: Optional[dict[str, Any]] = None) -> Optional[requests.Response]:
     """GET with one retry on failure, shared by list_documents and download_document.
 
     public, unauthenticated API - no auth to add here.
     """
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
-            response = requests.get(url, params=params, timeout=timeout)
+            response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
             response.raise_for_status()
             return response
         except requests.RequestException as exc:
@@ -36,10 +39,9 @@ def _get(url: str, params: Optional[dict[str, Any]] = None, timeout: int = 30) -
             else:
                 logger.error("SEMO request to %s failed after %d attempt(s)", url, RETRY_ATTEMPTS, exc_info=True)
                 return None
-    return None
 
 
-def list_documents(params: dict[str, Any], *, page_size: int = 1000) -> Optional[list[dict]]:
+def list_documents(params: dict[str, Any]) -> Optional[list[dict]]:
     """page through SEMO's static-reports document listing for the given filter params.
 
     reused by every endpoint that reads published report documents (day-ahead today,
@@ -49,7 +51,7 @@ def list_documents(params: dict[str, Any], *, page_size: int = 1000) -> Optional
     items: list[dict] = []
     page = 1
     while page <= MAX_PAGES:
-        response = _get(DOCUMENTS_LIST_URL, params={**params, "page": page, "page_size": page_size})
+        response = _get(DOCUMENTS_LIST_URL, params={**params, "page": page, "page_size": 1000})
         if response is None:
             return None
 
@@ -67,7 +69,7 @@ def list_documents(params: dict[str, Any], *, page_size: int = 1000) -> Optional
     return items
 
 
-def download_document(resource_name: str, timeout: int = 30) -> Optional[bytes]:
+def download_document(resource_name: str) -> Optional[bytes]:
     """download the raw content of a published SEMO report document."""
-    response = _get(f"{DOCUMENT_DOWNLOAD_BASE}/{resource_name}", timeout=timeout)
+    response = _get(f"{DOCUMENT_DOWNLOAD_BASE}/{resource_name}")
     return response.content if response is not None else None

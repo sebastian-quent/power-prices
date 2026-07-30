@@ -12,7 +12,10 @@ RETRY_ATTEMPTS = 2
 RETRY_BACKOFF_SECONDS = 10
 
 
-def fetch(path: str, params: dict, timeout: int = 30) -> Optional[list]:
+REQUEST_TIMEOUT_SECONDS = 30
+
+
+def fetch(path: str, params: dict) -> Optional[list]:
     """GET one OKTE ISOT REST endpoint, shared by all endpoints/*.py modules.
 
     public, unauthenticated API. returns the response parsed as JSON, or
@@ -22,7 +25,7 @@ def fetch(path: str, params: dict, timeout: int = 30) -> Optional[list]:
     url = f"{HOST}/{path}"
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
-            response = requests.get(url, params=params, timeout=timeout)
+            response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as exc:
@@ -35,4 +38,3 @@ def fetch(path: str, params: dict, timeout: int = 30) -> Optional[list]:
             else:
                 logger.error("OKTE request to %s failed after %d attempt(s)", url, RETRY_ATTEMPTS, exc_info=True)
                 return None
-    return None

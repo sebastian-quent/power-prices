@@ -18,7 +18,10 @@ RETRY_BACKOFF_SECONDS = 10
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
-def fetch(date: dt.date, timeout: int = 30) -> Optional[bytes]:
+REQUEST_TIMEOUT_SECONDS = 30
+
+
+def fetch(date: dt.date) -> Optional[bytes]:
     """GET one day's PZU (day-ahead) market results XML report - public, unauthenticated.
 
     returns raw XML bytes for the given delivery date, or None on request failure. a date
@@ -29,7 +32,7 @@ def fetch(date: dt.date, timeout: int = 30) -> Optional[bytes]:
     url = EXPORT_XML_URL.format(day=date.day, month=date.month, year=date.year)
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
-            response = requests.get(url, headers=HEADERS, timeout=timeout)
+            response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT_SECONDS)
             response.raise_for_status()
             return response.content
         except requests.RequestException as exc:
@@ -42,4 +45,3 @@ def fetch(date: dt.date, timeout: int = 30) -> Optional[bytes]:
             else:
                 logger.error("OPCOM request to %s failed after %d attempt(s)", url, RETRY_ATTEMPTS, exc_info=True)
                 return None
-    return None

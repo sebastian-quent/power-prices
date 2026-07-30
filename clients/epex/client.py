@@ -1,7 +1,6 @@
 import logging
 import socket
 import time
-from functools import lru_cache
 from typing import Optional
 
 import pandas as pd
@@ -18,23 +17,21 @@ RETRY_BACKOFF_SECONDS = 10
 CONNECT_TIMEOUT_SECONDS = 30  # paramiko.Transport applies no timeout to the raw TCP connect on its own
 
 _sftp: Optional[paramiko.SFTPClient] = None
-
-
-@lru_cache(maxsize=1)
-def _get_credentials() -> dict:
-    return load_setting("epex.sftp_server", resolve_secret=True)
+_credentials: Optional[dict] = None
 
 
 def get_connection() -> paramiko.SFTPClient:
     """shared SFTP connection, reused across calls instead of reconnecting per file"""
-    global _sftp
+    global _sftp, _credentials
     if _sftp is not None:
         try:
             if _sftp.get_channel().get_transport().is_active():
                 return _sftp
         except Exception:
             pass
-    credentials = _get_credentials()
+    if _credentials is None:
+        _credentials = load_setting("epex.sftp_server", resolve_secret=True)
+    credentials = _credentials
     sock = socket.create_connection((HOST, PORT), timeout=CONNECT_TIMEOUT_SECONDS)
     sock.settimeout(None)  # back to blocking for the SSH session itself - only the connect is bounded
     transport = paramiko.Transport(sock)
