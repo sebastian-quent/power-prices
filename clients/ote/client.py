@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 WSDL = "https://www.ote-cr.cz/services/PublicDataService?wsdl"
 
+REQUEST_TIMEOUT_SECONDS = 30
 RETRY_ATTEMPTS = 2
 RETRY_BACKOFF_SECONDS = 10
 
@@ -27,11 +28,16 @@ def fetch(operation: str, params: dict) -> Optional[list]:
     retrying once.
     """
     global _client
-    if _client is None:
-        _client = zeep.Client(wsdl=WSDL, transport=Transport(session=Session()))
-    method = getattr(_client.service, operation)
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
+            if _client is None:
+                transport = Transport(
+                    session=Session(),
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                    operation_timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                _client = zeep.Client(wsdl=WSDL, transport=transport)
+            method = getattr(_client.service, operation)
             return serialize_object(method(**params))
         except (zeep.exceptions.Error, requests.RequestException) as exc:
             if attempt < RETRY_ATTEMPTS:

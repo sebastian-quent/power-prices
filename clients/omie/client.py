@@ -50,16 +50,18 @@ def list_files(realdir: str, dir_label: str, parents: str) -> Optional[dict[dt.d
     rather than per-endpoint, same shape as clients/semo/client.py's list_documents.
 
     OMIE republishes corrected files under an incremented version suffix
-    (marginalpdbcpt_20230121.3 superseding .1/.2) - the file-access-list page
-    already resolves to just the current version per date, so this returns
-    that listing as-is rather than guessing/incrementing version suffixes ourselves.
+    (marginalpdbcpt_20230121.3 superseding .1/.2) - the file-access-list page is expected
+    to list just the current version per date, but if a correction is mid-publish (or row
+    order isn't append-only) more than one suffix could appear for the same date, so the
+    highest suffix per date is kept explicitly rather than trusting last-write-wins.
     """
     response = _get(LIST_URL, params={"parents": parents, "dir": dir_label, "realdir": realdir})
     if response is None:
         return None
 
-    pattern = re.compile(rf"^{re.escape(realdir)}_(\d{{8}})\.\d+$")
+    pattern = re.compile(rf"^{re.escape(realdir)}_(\d{{8}})\.(\d+)$")
     tree = html.fromstring(response.content)
+    best_suffix: dict[dt.date, int] = {}
     files: dict[dt.date, tuple[str, pd.Timestamp]] = {}
     for row in tree.xpath("//tr[td]"):
         cells = row.xpath("./td/@data-val")
@@ -70,6 +72,10 @@ def list_files(realdir: str, dir_label: str, parents: str) -> Optional[dict[dt.d
         if match is None:
             continue
         date = dt.datetime.strptime(match.group(1), "%Y%m%d").date()
+        suffix = int(match.group(2))
+        if date in best_suffix and suffix <= best_suffix[date]:
+            continue
+        best_suffix[date] = suffix
         files[date] = (filename, pd.Timestamp(int(mtime), unit="s", tz="UTC"))
     return files
 

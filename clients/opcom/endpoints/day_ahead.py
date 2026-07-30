@@ -42,7 +42,10 @@ def parse_response(raw: bytes, date: dt.date, forecasttime: pd.Timestamp) -> pd.
     999 on this site
     """
     document = xmltodict.parse(raw)
-    details = document.get("resultset", {}).get("Detail") or []
+    # xmltodict parses a self-closing <resultset/> (no report published for this date) to
+    # None, not {} - .get("resultset", {}) only falls back when the key is absent, so an
+    # explicit `or {}` is needed to handle the key-present-but-None case too.
+    details = (document.get("resultset") or {}).get("Detail") or []
     if not isinstance(details, list):
         details = [details]
     if not details:

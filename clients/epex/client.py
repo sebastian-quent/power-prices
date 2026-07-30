@@ -36,7 +36,11 @@ def get_connection() -> paramiko.SFTPClient:
     sock.settimeout(None)  # back to blocking for the SSH session itself - only the connect is bounded
     transport = paramiko.Transport(sock)
     transport.auth_timeout = 120
-    transport.connect(username=credentials["username"], password=credentials["password"])
+    try:
+        transport.connect(username=credentials["username"], password=credentials["password"])
+    except Exception:
+        transport.close()  # connect() failed mid-handshake - avoid leaking the socket/transport
+        raise
     _sftp = paramiko.SFTPClient.from_transport(transport)
     return _sftp
 

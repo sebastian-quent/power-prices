@@ -66,7 +66,14 @@ def _parse_market_result(content: bytes) -> tuple[Optional[pd.Timestamp], Option
         label = row[0]
 
         if label == "Publication date time" and len(row) > 1:
-            publication_time = pd.Timestamp(row[1])
+            parsed = pd.Timestamp(row[1])
+            if parsed.tzinfo is None:
+                # unlike the value timestamps (confirmed explicit-UTC "Z"), this field's tz
+                # isn't confirmed - don't guess a naive timestamp is UTC, fall back to
+                # utcnow() below instead (same as when the field is missing entirely)
+                logger.warning("SEMO: naive 'Publication date time' %r, ignoring - using utcnow() fallback", row[1])
+            else:
+                publication_time = parsed
         elif label == "Market" and len(row) > 1:
             current_market = row[1]
         elif (

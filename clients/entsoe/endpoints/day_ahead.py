@@ -2,6 +2,7 @@ import datetime as dt
 import logging
 from pathlib import Path
 from typing import Optional
+from xml.parsers.expat import ExpatError
 
 import pandas as pd
 import pytz
@@ -130,7 +131,7 @@ def fetch_and_parse(bidding_zones: list, from_date: dt.date, to_date: dt.date, m
                 continue
             try:
                 zone_frames.append(parse_response(raw, bidding_zone, forecasttime, market=market))
-            except (KeyError, ValueError):
+            except (KeyError, ValueError, ExpatError):
                 logger.error(
                     "skipping %s %s: failed to parse ENTSO-E response", bidding_zone, date.date(), exc_info=True
                 )

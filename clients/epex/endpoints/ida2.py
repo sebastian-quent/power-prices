@@ -168,6 +168,7 @@ def dump(df: pd.DataFrame) -> None:
     logger.info("PriceStore.dump: wrote %d row(s) for EPEX IDA2", written)
 
 
+# cron: 5,20,35,50 10-11 * * *  (CET/CEST; gate closure 10:00 CET/CEST)
 @flow
 def run(
     bidding_zones: Optional[list] = None, from_date: Optional[dt.date] = None, to_date: Optional[dt.date] = None

@@ -188,6 +188,8 @@ def dump(df: pd.DataFrame) -> None:
     logger.info("PriceStore.dump: wrote %d row(s) for EPEX VWAP", written)
 
 
+# cron: 5,20,35,50 0-3 * * *  (CET/CEST; ~4h window just after midnight so "yesterday" resolves
+# correctly for both summer same-evening publish and winter shortly-after-midnight publish)
 @flow
 def run(
     bidding_zones: Optional[list] = None, from_date: Optional[dt.date] = None, to_date: Optional[dt.date] = None
