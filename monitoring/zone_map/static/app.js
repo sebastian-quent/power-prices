@@ -71,9 +71,8 @@ function selectView(view) {
   if (view === currentView) return;
   currentView = view;
   document.querySelectorAll(".view-btn").forEach((btn) => btn.classList.toggle("active", btn.dataset.view === view));
-  document.getElementById("page-title").textContent = view === "coverage" ? "COVERAGE" : "EUROPEAN PRICES";
+  document.getElementById("page-title").textContent = view === "coverage" ? "COVERAGE" : "PRICES";
   document.getElementById("price-scale").hidden = view !== "prices";
-  document.getElementById("coverage-scale").hidden = view !== "coverage";
   for (const [zoneCode, layer] of zoneLayers) {
     layer.setStyle(zoneStyle(layer._priceInfo));
     layer.setTooltipContent(zoneLabelHtml(zoneCode, layer._priceInfo));

@@ -198,29 +198,6 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
-.coverage-scale {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-variant-numeric: tabular-nums;
-}
-
-.coverage-scale .cov-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-  margin-left: 10px;
-}
-
-.coverage-scale .cov-dot:first-child {
-  margin-left: 0;
-}
-
-.cov-dot.cov-complete { background: var(--brand); }
-.cov-dot.cov-partial { background: #fab219; }
-.cov-dot.cov-missing { background: var(--nodead-stroke); }
-
 .scale-bar {
   width: 72px;
   height: 7px;
@@ -296,6 +273,7 @@ h1 {
 
 .auction-light.partial { background: #fab219; }
 .auction-light.complete { background: #0ca30c; }
+.auction-light.late { background: #be4242; } /* same red as the price scale's expensive end */
 
 .auction-main {
   display: flex;

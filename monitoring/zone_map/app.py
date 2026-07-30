@@ -15,7 +15,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from clients.epex.endpoints.ida2 import ZONE_FILE_CONFIG as IDA2_ZONES
 from clients.epex.endpoints.vwap import ZONE_FILE_CONFIG as VWAP_ZONES
-from monitoring.zone_map.zones import IN_SCOPE_ZONES, build_zone_summary
+from monitoring.zone_map.zones import DELIVERY_DAY_TZ, IN_SCOPE_ZONES, build_zone_summary
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -29,15 +29,23 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 # BE-only, see project-overview.md > Scope) reads "complete" once BE lands rather than staying
 # amber/red forever for zones it was never going to cover.
 #
-# `clears` times are CET/CEST wall-clock, matching project-overview.md > Scheduling.
+# `clears` times are CET/CEST wall-clock, matching project-overview.md > Scheduling. `clear_at`
+# is the same clearing time made machine-checkable: (day_offset relative to target_date, wall-clock
+# time in DELIVERY_DAY_TZ) at which the auction has definitely cleared, used by get_auctions() to
+# tell "hasn't cleared yet" (no light) apart from "cleared and we still have nothing" (red) - see
+# the "late" status below. For ID1/ID3/IDFULL's published range, the *end* of the range is used
+# (23:20, not 22:40) so the light doesn't turn red while the auction is still within its normal
+# publish window.
 MARKET_OPTIONS = {
     "day_ahead": {
         "market_type": "DAY_AHEAD", "market": None, "default_offset_days": 1,
         "label": "Day-ahead", "clears": "~12:55 CET/CEST", "zones": IN_SCOPE_ZONES,
+        "clear_at": (-1, dt.time(12, 55)),
     },
     "ida2": {
         "market_type": "INTRADAY", "market": "IDA2", "default_offset_days": 0,
         "label": "IDA2", "clears": "10:00 CET/CEST", "zones": list(IDA2_ZONES),
+        "clear_at": (0, dt.time(10, 0)),
     },
     # ID1/ID3/IDFULL are EOD continuous-trading VWAP indices (see clients/epex/endpoints/vwap.py),
     # not auctions - not published until the delivery day's continuous trading has fully closed,
@@ -45,14 +53,17 @@ MARKET_OPTIONS = {
     "id1": {
         "market_type": "INTRADAY", "market": "ID1", "default_offset_days": -1,
         "label": "ID1", "clears": "EOD, ~22:40-23:20 CET/CEST", "zones": list(VWAP_ZONES),
+        "clear_at": (0, dt.time(23, 20)),
     },
     "id3": {
         "market_type": "INTRADAY", "market": "ID3", "default_offset_days": -1,
         "label": "ID3", "clears": "EOD, ~22:40-23:20 CET/CEST", "zones": list(VWAP_ZONES),
+        "clear_at": (0, dt.time(23, 20)),
     },
     "idfull": {
         "market_type": "INTRADAY", "market": "IDFULL", "default_offset_days": -1,
         "label": "IDFULL", "clears": "EOD, ~22:40-23:20 CET/CEST", "zones": list(VWAP_ZONES),
+        "clear_at": (0, dt.time(23, 20)),
     },
 }
 
@@ -120,17 +131,28 @@ def get_auctions(date: str | None = None) -> dict:
     is given (e.g. a bare API call with no query param).
 
     status is "complete" once every zone that auction actually covers has data, "partial" once
-    some (but not all) of them do, "pending" while none do yet - not raised as an error even if
-    an auction is running late, same "log, don't fail" spirit as monitoring/day_ahead_completeness.py.
+    some (but not all) of them do. With none yet, it's "late" if the auction's own clearing time
+    (see MARKET_OPTIONS' clear_at) has already passed for this target_date - a real gap worth
+    flagging red - or "pending" if it simply hasn't cleared yet, which is expected and shown
+    neutral rather than as a problem. Never raised as an error even when late, same "log, don't
+    fail" spirit as monitoring/day_ahead_completeness.py.
     """
     target_date = dt.date.fromisoformat(date) if date else dt.date.today()
+    now = dt.datetime.now(DELIVERY_DAY_TZ)
     auctions = []
     for key, opts in MARKET_OPTIONS.items():
         summary = build_zone_summary(target_date, market_type=opts["market_type"], market=opts["market"])
         zones = opts["zones"]
         have = sum(1 for zone in zones if summary[zone]["has_data"])
         total = len(zones)
-        status = "complete" if have == total else ("partial" if have else "pending")
+        day_offset, clear_time = opts["clear_at"]
+        cleared = now >= DELIVERY_DAY_TZ.localize(dt.datetime.combine(target_date + dt.timedelta(days=day_offset), clear_time))
+        if have == total:
+            status = "complete"
+        elif have:
+            status = "partial"
+        else:
+            status = "late" if cleared else "pending"
         auctions.append({
             "key": key, "label": opts["label"], "clears": opts["clears"],
             "have": have, "total": total, "status": status,
