@@ -39,9 +39,9 @@ let closeTimer = null;
 // display label for the empty-note in the hover card only - mirrors app.py's MARKET_OPTIONS keys
 const MARKET_LABELS = { day_ahead: "day-ahead", ida2: "IDA2", id1: "ID1", id3: "ID3", idfull: "IDFULL" };
 
-// mirrors app.py's MARKET_OPTIONS keys - switching market always drops any explicit date so the
-// backend's own per-market default kicks in (tomorrow for day-ahead, today for IDA2), since a
-// date picked in one view rarely makes sense carried over into the other.
+// mirrors app.py's MARKET_OPTIONS keys - only used as the startup default (tomorrow for
+// day-ahead and IDA2 alike, yesterday for the VWAP indices, see MARKET_OPTIONS); once loaded,
+// selectMarket() carries the currently selected date through instead of resetting to it.
 let currentMarket = "day_ahead";
 
 // "prices" (default) is the existing green->red price-intensity map; "coverage" is a quick
@@ -365,11 +365,23 @@ function shiftDate(dateStr, days) {
   return d.toISOString().slice(0, 10);
 }
 
+// "today" per the same Europe/Copenhagen anchor the backend's delivery-day math uses (see
+// monitoring/zone_map/zones.py DELIVERY_DAY_TZ), not the viewer's own browser timezone.
+function todayStr() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Copenhagen" });
+}
+
+function setDateInput(dateStr) {
+  const dateInput = document.getElementById("date-input");
+  dateInput.value = dateStr;
+  dateInput.classList.toggle("is-today", dateStr === todayStr());
+}
+
 async function loadPrices(dateStr) {
   const params = new URLSearchParams({ market: currentMarket });
   if (dateStr) params.set("date", dateStr);
   const prices = await fetch(`/api/prices?${params}`).then((r) => r.json());
-  document.getElementById("date-input").value = prices.date;
+  setDateInput(prices.date);
   applyPrices(prices.zones);
   loadAuctions(prices.date);
 }
@@ -383,7 +395,7 @@ async function main() {
   ]);
 
   const priceByZone = prices.zones;
-  document.getElementById("date-input").value = prices.date;
+  setDateInput(prices.date);
   loadAuctions(prices.date);
   computePriceRange(priceByZone);
   updateScaleLegend();

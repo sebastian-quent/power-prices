@@ -225,3 +225,5 @@ __marimo__/
 
 
 config.yaml
+
+local_scheduler/

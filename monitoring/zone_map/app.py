@@ -20,9 +20,10 @@ from monitoring.zone_map.zones import DELIVERY_DAY_TZ, IN_SCOPE_ZONES, build_zon
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 # one entry per auction the UI can show. day-ahead defaults to tomorrow's delivery day (auctions
-# clear the day before delivery); IDA2 is a same-day SIDC auction (see
-# clients/epex/endpoints/ida2.py) so it defaults to today instead. IDA1/IDA3 would slot in here
-# the same way once those scrapers exist (see project-overview.md > Open items).
+# clear the day before delivery); IDA2 clears on the same D-1 timing (see
+# clients/epex/endpoints/ida2.py), gate closure 22:00 CET/CEST the evening before delivery, so it
+# also defaults to tomorrow. IDA1/IDA3 would slot in here the same way once those scrapers exist
+# (see project-overview.md > Open items).
 #
 # `zones` is the completeness denominator for the /api/auctions traffic light - each auction's
 # own actually-scraped zone list, not the full 41-zone IN_SCOPE_ZONES, so e.g. IDA2 (currently
@@ -43,9 +44,9 @@ MARKET_OPTIONS = {
         "clear_at": (-1, dt.time(12, 55)),
     },
     "ida2": {
-        "market_type": "INTRADAY", "market": "IDA2", "default_offset_days": 0,
-        "label": "IDA2", "clears": "10:00 CET/CEST", "zones": list(IDA2_ZONES),
-        "clear_at": (0, dt.time(10, 0)),
+        "market_type": "INTRADAY", "market": "IDA2", "default_offset_days": 1,
+        "label": "IDA2", "clears": "22:00 CET/CEST (D-1)", "zones": list(IDA2_ZONES),
+        "clear_at": (-1, dt.time(22, 0)),
     },
     # ID1/ID3/IDFULL are EOD continuous-trading VWAP indices (see clients/epex/endpoints/vwap.py),
     # not auctions - not published until the delivery day's continuous trading has fully closed,
@@ -112,8 +113,7 @@ def index() -> FileResponse:
 def get_prices(date: str | None = None, market: str = "day_ahead") -> dict:
     """price summary per in-scope bidding zone for one market view (see MARKET_OPTIONS).
     `date` is the delivery day (YYYY-MM-DD); defaults to that market's own natural default -
-    tomorrow for day-ahead (same default as monitoring/completeness.py's run()),
-    today for IDA2."""
+    tomorrow for day-ahead and IDA2 alike (same D-1 clearing pattern, see MARKET_OPTIONS)."""
     if market not in MARKET_OPTIONS:
         market = "day_ahead"
     opts = MARKET_OPTIONS[market]

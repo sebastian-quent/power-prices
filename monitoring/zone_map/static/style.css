@@ -4,19 +4,19 @@
   /* pending: in-scope zone, no rows landed yet for this day - kept close to the map's own
      background tone (low fillOpacity in app.js on top of this) so it stays out of the way
      rather than competing for attention with priced zones. */
-  --nodata-fill: #ece9de;
-  --nodead-stroke: #c7c3b5;
-  /* context: everything outside IN_SCOPE_ZONES - never scraped, much darker grey so the two
-     read as clearly different shades rather than two near-identical off-whites. */
-  --context-fill: #4d4b45;
-  --context-stroke: #38362f;
-  --bg: #fbfaf7;
-  --map-bg-inner: #f3f1ea;
-  --map-bg-outer: #e9e6dc;
+  --nodata-fill: #e7e7e5;
+  --nodead-stroke: #cfcfcc;
+  /* context: everything outside IN_SCOPE_ZONES - never scraped, a mid grey so the two
+     read as clearly different shades without the dark tone overpowering a light background. */
+  --context-fill: #8c8c88;
+  --context-stroke: #6f6f6b;
+  --bg: #f5f5f3;
+  --map-bg-inner: #eeeeec;
+  --map-bg-outer: #e0e0dc;
   --text: #232323;
   --text-muted: #6b6b6b;
   --card-bg: #ffffff;
-  --card-border: #e2e0d8;
+  --card-border: #dcdcd9;
   --label-bg: rgba(255, 255, 255, 0.82);
   --control-bg: rgba(255, 255, 255, 0.7);
   --noneur-fill: #c7d3e0;
@@ -143,6 +143,18 @@ h1 {
 #date-input::-webkit-calendar-picker-indicator {
   opacity: 0.6;
   cursor: pointer;
+}
+
+/* flags the input itself as "showing today", since a native <input type="date">'s own popup
+   calendar grid is a browser-shadow-DOM control with no cross-browser CSS hook to style. */
+#date-input.is-today {
+  color: var(--brand-dark);
+  font-weight: 700;
+}
+
+.day-picker:has(#date-input.is-today) {
+  background: color-mix(in srgb, var(--brand) 18%, var(--nodata-fill));
+  border-color: var(--brand);
 }
 
 @media (prefers-color-scheme: dark) {
