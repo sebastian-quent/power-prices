@@ -112,7 +112,7 @@ def index() -> FileResponse:
 def get_prices(date: str | None = None, market: str = "day_ahead") -> dict:
     """price summary per in-scope bidding zone for one market view (see MARKET_OPTIONS).
     `date` is the delivery day (YYYY-MM-DD); defaults to that market's own natural default -
-    tomorrow for day-ahead (same default as monitoring/day_ahead_completeness.py's run()),
+    tomorrow for day-ahead (same default as monitoring/completeness.py's run()),
     today for IDA2."""
     if market not in MARKET_OPTIONS:
         market = "day_ahead"
@@ -135,7 +135,7 @@ def get_auctions(date: str | None = None) -> dict:
     (see MARKET_OPTIONS' clear_at) has already passed for this target_date - a real gap worth
     flagging red - or "pending" if it simply hasn't cleared yet, which is expected and shown
     neutral rather than as a problem. Never raised as an error even when late, same "log, don't
-    fail" spirit as monitoring/day_ahead_completeness.py.
+    fail" spirit as monitoring/completeness.py.
     """
     target_date = dt.date.fromisoformat(date) if date else dt.date.today()
     now = dt.datetime.now(DELIVERY_DAY_TZ)

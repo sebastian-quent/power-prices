@@ -146,7 +146,7 @@ def deploy_all() -> set:
 
     # Monitoring
     names.add(deploy_flow(
-        entrypoint="monitoring/day_ahead_completeness.py:run",
+        entrypoint="monitoring/completeness.py:run",
         crons=["0 17 * * *"],
         tags=["monitoring"],
     ))

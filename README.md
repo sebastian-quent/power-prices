@@ -15,9 +15,9 @@ being extended to other zones/sources or Prefect-deployed.
 - `core/` - logging, utils; `PriceStore` (dump/retrieve) now lives in `quent_core`
 - `clients/<source>/client.py` - auth + generic request function for that source
 - `clients/<source>/endpoints/<name>.py` - fetch, parse, dump, `@flow`-decorated `run()`
-- `monitoring/` - `day_ahead_completeness.py` (Prefect flow, zone-level data-completeness
-  check, separate from flow health); `zone_map/` - FastAPI + plain-JS map dashboard showing
-  per-zone coverage and price level (see Dashboard below)
+- `monitoring/` - `completeness.py` (Prefect flow, zone/market-level data-completeness check
+  across day-ahead, IDA2, and VWAP, separate from flow health); `zone_map/` - FastAPI +
+  plain-JS map dashboard showing per-zone coverage and price level (see Dashboard below)
 - `db/migrations/` - DDL for `prod.prices`
 - `scripts/` - one-off backfill/verification drivers, not scheduled
 

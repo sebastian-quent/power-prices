@@ -20,7 +20,7 @@ from Database.db_connect import engine
 MARKET_TYPE = "DAY_AHEAD"
 DELIVERY_DAY_TZ = pytz.timezone("Europe/Copenhagen")
 
-# same 41-zone list as monitoring/day_ahead_completeness.py, duplicated rather than shared via
+# same 41-zone list as monitoring/completeness.py, duplicated rather than shared via
 # core/ - consistent with that module's own note to only promote it once a real need for
 # sharing shows up.
 IN_SCOPE_ZONES = [

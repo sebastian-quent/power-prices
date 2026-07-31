@@ -16,7 +16,7 @@ Checks, per (bidding_zone, market):
      no wildly-out-of-range prices.
 
 Delivery-day boundary uses Europe/Copenhagen, same anchor as every other cross-cutting script
-in this repo (monitoring/day_ahead_completeness.py).
+in this repo (monitoring/completeness.py).
 """
 import datetime as dt
 import sys
@@ -31,7 +31,7 @@ from sqlalchemy import text
 
 from core import dev_paths  # noqa: F401  (adds sibling Production repo to sys.path for Database.*)
 from Database.db_connect import engine
-from monitoring.day_ahead_completeness import IN_SCOPE_ZONES, _day_bounds_utc
+from monitoring.completeness import IN_SCOPE_ZONES, _day_bounds_utc
 
 MARKET_TYPE = "DAY_AHEAD"
 FROM_DATE = dt.date(2024, 1, 1)
