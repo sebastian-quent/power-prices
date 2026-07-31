@@ -14,15 +14,15 @@ logger = logging.getLogger(__name__)
 
 price_store = PriceStore(engine)
 
-MARKET = "IDA2"
+MARKET = "IDA1"
 ZoneFile = ida.ZoneFile
 
-OUTPUT_DIR = Path("output/epex/ida2")
+OUTPUT_DIR = Path("output/epex/ida1")
 
-# TODO: expand eventually to all EPEX bidding zones
-ZONE_FILE_CONFIG = {
-    "BE": ZoneFile("belgium", "belgium"),
-}
+# empty until IDA1 scraping is confirmed needed (see project-overview.md Open items) -
+# add zones here to go live, same shape as ida2.py's ZONE_FILE_CONFIG, e.g.:
+# "BE": ZoneFile("belgium", "belgium"),
+ZONE_FILE_CONFIG = {}
 
 
 def fetch_and_parse(bidding_zones: list, from_date: dt.date, to_date: dt.date) -> pd.DataFrame:
@@ -30,26 +30,27 @@ def fetch_and_parse(bidding_zones: list, from_date: dt.date, to_date: dt.date) -
 
 
 def dump(df: pd.DataFrame) -> None:
-    """write IDA2 intraday auction prices to prod.prices via PriceStore."""
+    """write IDA1 intraday auction prices to prod.prices via PriceStore."""
     # OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     # for bidding_zone, zone_df in df.groupby("bidding_zone"):
     #     zone_df.to_csv(OUTPUT_DIR / f"{bidding_zone}.csv", index=False)
 
     written = price_store.dump(df)
-    logger.info("PriceStore.dump: wrote %d row(s) for EPEX IDA2", written)
+    logger.info("PriceStore.dump: wrote %d row(s) for EPEX IDA1", written)
 
 
-# cron: 5,20,35,50 22-23 * * *  (CET/CEST; IDA2 gate closure 22:00 CET/CEST on D-1, catch-up starts 22:05)
+# not yet scheduled - ZONE_FILE_CONFIG is intentionally empty until IDA1 scraping is
+# confirmed needed (see project-overview.md Open items); confirm gate closure timing
+# before adding a cron and zones
 @flow
 def run(
     bidding_zones: Optional[list] = None, from_date: Optional[dt.date] = None, to_date: Optional[dt.date] = None
 ) -> pd.DataFrame:
-    """fetch EPEX Pan-European IDA2 intraday auction prices and dump to prod.prices.
+    """fetch EPEX Pan-European IDA1 intraday auction prices and dump to prod.prices.
 
-    bidding_zones optional, defaults to every zone in ZONE_FILE_CONFIG
-    from_date/to_date optional for historical backfill; defaults to tomorrow only - IDA2 gate
-    closure is 22:00 CET/CEST the evening before delivery day (same D-1 timing as SDAC's
-    day-ahead clearing, not a same-day auction).
+    bidding_zones optional, defaults to every zone in ZONE_FILE_CONFIG (empty for now)
+    from_date/to_date optional for historical backfill; defaults to tomorrow only, matching
+    ida2.py's D-1 gate-closure assumption - revisit once IDA1's own gate closure is confirmed.
     """
     setup_logging()
     tomorrow = dt.date.today() + dt.timedelta(days=1)
@@ -59,7 +60,7 @@ def run(
 
     df = fetch_and_parse(bidding_zones, from_date=from_date, to_date=to_date)
     if df.empty:
-        logger.warning("no EPEX IDA2 data fetched for %s to %s", from_date, to_date)
+        logger.warning("no EPEX IDA1 data fetched for %s to %s", from_date, to_date)
     return df
 
 

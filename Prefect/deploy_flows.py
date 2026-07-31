@@ -21,7 +21,11 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def deploy_flow(entrypoint: str, crons: List[str], tags: List[str]) -> str:
-    name = entrypoint.split(":")[-1]
+    # every endpoint's flow function is named run()/run_gb()/run_ie() - keying the
+    # deployment name off the function name alone collides across files, so use the
+    # full module path instead (still derived here, no per-file @flow(name=...) needed)
+    module_path, func_name = entrypoint.split(":")
+    name = f"{module_path.removesuffix('.py').replace('/', '-')}-{func_name}"
 
     flow_instance = flow.from_source(
         source=REPO_ROOT,
@@ -129,7 +133,7 @@ def deploy_all() -> set:
     # EPEX intraday IDA2
     names.add(deploy_flow(
         entrypoint="clients/epex/endpoints/ida2.py:run",
-        crons=["5,20,35,50 10-11 * * *"],
+        crons=["5,20,35,50 22-23 * * *"],
         tags=["epex", "intraday", "ida2"],
     ))
 
