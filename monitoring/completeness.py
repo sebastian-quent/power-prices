@@ -6,7 +6,9 @@ import pandas as pd
 import pytz
 from prefect import flow
 
+import clients.epex.endpoints.ida1 as epex_ida1
 import clients.epex.endpoints.ida2 as epex_ida2
+import clients.epex.endpoints.ida3 as epex_ida3
 import clients.epex.endpoints.vwap as epex_vwap
 from core import PriceStore, setup_logging  # noqa: E402 (must precede Database import, see core/dev_paths.py)
 from Database.db_connect import engine
@@ -83,8 +85,9 @@ def send_alert(sections: list[tuple[str, dt.date, list[str]]]) -> None:
 
 
 # cron: 0 17 * * *  (CET/CEST; runs after every live source's catch-up window for tomorrow's
-# delivery day has closed - GB HalfHourly is the latest at ~15:30 CET. IDA2/VWAP check earlier
-# delivery days in the same run, see below - their own publish windows have already closed too)
+# delivery day has closed - GB HalfHourly is the latest at ~15:30 CET. IDA1/IDA2/IDA3/VWAP check
+# earlier delivery days in the same run, see below - their own publish windows have already
+# closed too)
 @flow
 def run(target_date: Optional[dt.date] = None) -> dict[str, list[str]]:
     """check that every activated zone/market combo has landed data for its own target delivery day.
@@ -92,23 +95,41 @@ def run(target_date: Optional[dt.date] = None) -> dict[str, list[str]]:
     never raises/fails the Prefect run on missing data - zero rows for a combo is a monitorable
     outcome (logged + alerted), not a code error. target_date defaults to tomorrow's delivery
     day, anchoring the DAY_AHEAD check (SDAC clears same-day ~12:55 CET for tomorrow's delivery).
-    IDA2 (gate closure 22:00 CET the evening before delivery) and VWAP (published the morning
-    after delivery) are on different schedules, so they check target_date - 1 and - 2
-    respectively - by this flow's 17:00 CET run, those are the most recent delivery days each
-    source's catch-up window has actually had time to publish.
+    IDA1 (gate closure 15:00 CET the afternoon before delivery) checks target_date itself, since
+    its D-1 auction for tomorrow's delivery has already cleared earlier this same afternoon.
+    IDA2 (gate closure 22:00 CET the evening before delivery) and IDA3 (gate closure ~10:00 CET
+    on delivery day itself) both check target_date - 1 (today) - different auction timing, same
+    resulting date, since both have already published for today by this run's 17:00 CET slot.
+    VWAP (published the morning after delivery) checks target_date - 2 (yesterday).
     """
     setup_logging()
     target_date = target_date or dt.date.today() + dt.timedelta(days=1)
+    ida1_date = target_date
     ida2_date = target_date - dt.timedelta(days=1)
+    ida3_date = target_date - dt.timedelta(days=1)
     vwap_date = target_date - dt.timedelta(days=2)
 
     sections = [
         ("DAY_AHEAD", target_date, check_completeness(IN_SCOPE_ZONES, MARKET_TYPE, target_date)),
         (
+            "EPEX IDA1",
+            ida1_date,
+            check_completeness(
+                list(epex_ida1.ZONE_FILE_CONFIG), INTRADAY_MARKET_TYPE, ida1_date, markets=[epex_ida1.MARKET]
+            ),
+        ),
+        (
             "EPEX IDA2",
             ida2_date,
             check_completeness(
                 list(epex_ida2.ZONE_FILE_CONFIG), INTRADAY_MARKET_TYPE, ida2_date, markets=[epex_ida2.MARKET]
+            ),
+        ),
+        (
+            "EPEX IDA3",
+            ida3_date,
+            check_completeness(
+                list(epex_ida3.ZONE_FILE_CONFIG), INTRADAY_MARKET_TYPE, ida3_date, markets=[epex_ida3.MARKET]
             ),
         ),
         (

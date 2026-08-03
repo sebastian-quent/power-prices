@@ -37,7 +37,15 @@ let hoverTooltip = null;
 let closeTimer = null;
 
 // display label for the empty-note in the hover card only - mirrors app.py's MARKET_OPTIONS keys
-const MARKET_LABELS = { day_ahead: "day-ahead", ida2: "IDA2", id1: "ID1", id3: "ID3", idfull: "IDFULL" };
+const MARKET_LABELS = {
+  day_ahead: "day-ahead", ida1: "IDA1", ida2: "IDA2", ida3: "IDA3", id1: "ID1", id3: "ID3", idfull: "IDFULL",
+};
+
+// groups the auctions panel into Day-ahead / IDA1-3 / VWAP sections - purely a rendering
+// grouping (see loadAuctions), mirrors app.py's MARKET_OPTIONS ordering rather than driving it.
+const AUCTION_GROUPS = {
+  day_ahead: "Day-ahead", ida1: "IDA", ida2: "IDA", ida3: "IDA", id1: "VWAP", id3: "VWAP", idfull: "VWAP",
+};
 
 // mirrors app.py's MARKET_OPTIONS keys - only used as the startup default (tomorrow for
 // day-ahead and IDA2 alike, yesterday for the VWAP indices, see MARKET_OPTIONS); once loaded,
@@ -98,7 +106,19 @@ async function loadAuctions(dateStr) {
   const params = dateStr ? `?date=${dateStr}` : "";
   const data = await fetch(`/api/auctions${params}`).then((r) => r.json());
   const list = document.getElementById("auctions-list");
-  list.innerHTML = data.auctions.map(auctionRowHtml).join("");
+  // group headers (Day-ahead / IDA / VWAP) - a thin divider + small title whenever the group
+  // changes, skipping the divider on the very first group so the panel title isn't doubled up.
+  let html = "";
+  let lastGroup = null;
+  for (const a of data.auctions) {
+    const group = AUCTION_GROUPS[a.key] || "";
+    if (group !== lastGroup) {
+      html += `<div class="auction-group-title${lastGroup ? " with-divider" : ""}">${group}</div>`;
+      lastGroup = group;
+    }
+    html += auctionRowHtml(a);
+  }
+  list.innerHTML = html;
   list.querySelectorAll(".auction-row").forEach((row) => {
     row.addEventListener("click", () => selectMarket(row.dataset.market));
   });

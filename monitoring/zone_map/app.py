@@ -1,6 +1,6 @@
 """map dashboard: European bidding zones, colored once an auction's price has landed - covers
-day-ahead, EPEX's IDA2 intraday auction, and EPEX's ID1/ID3/IDFULL intraday continuous VWAP
-indices, see MARKET_OPTIONS.
+day-ahead, EPEX's IDA1/IDA2/IDA3 intraday auctions, and EPEX's ID1/ID3/IDFULL intraday continuous
+VWAP indices, see MARKET_OPTIONS.
 
 run with: poetry run uvicorn monitoring.zone_map.app:app --reload
 """
@@ -13,17 +13,20 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
+from clients.epex.endpoints.ida1 import ZONE_FILE_CONFIG as IDA1_ZONES
 from clients.epex.endpoints.ida2 import ZONE_FILE_CONFIG as IDA2_ZONES
+from clients.epex.endpoints.ida3 import ZONE_FILE_CONFIG as IDA3_ZONES
 from clients.epex.endpoints.vwap import ZONE_FILE_CONFIG as VWAP_ZONES
 from monitoring.zone_map.zones import DELIVERY_DAY_TZ, IN_SCOPE_ZONES, build_zone_summary
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 # one entry per auction the UI can show. day-ahead defaults to tomorrow's delivery day (auctions
-# clear the day before delivery); IDA2 clears on the same D-1 timing (see
-# clients/epex/endpoints/ida2.py), gate closure 22:00 CET/CEST the evening before delivery, so it
-# also defaults to tomorrow. IDA1/IDA3 would slot in here the same way once those scrapers exist
-# (see project-overview.md > Open items).
+# clear the day before delivery); IDA1/IDA2 clear on the same D-1 timing (see
+# clients/epex/endpoints/ida1.py / ida2.py), gate closures 15:00/22:00 CET/CEST the afternoon/
+# evening before delivery, so both also default to tomorrow. IDA3 is a same-day auction instead
+# (gate closure ~10:00 CET/CEST on delivery day D itself, see clients/epex/endpoints/ida3.py), so
+# it defaults to today.
 #
 # `zones` is the completeness denominator for the /api/auctions traffic light - each auction's
 # own actually-scraped zone list, not the full 41-zone IN_SCOPE_ZONES, so e.g. IDA2 (currently
@@ -43,27 +46,37 @@ MARKET_OPTIONS = {
         "label": "Day-ahead", "clears": "~12:55 CET/CEST", "zones": IN_SCOPE_ZONES,
         "clear_at": (-1, dt.time(12, 55)),
     },
+    "ida1": {
+        "market_type": "INTRADAY", "market": "IDA1", "default_offset_days": 1,
+        "label": "IDA1", "clears": "15:00 CET/CEST (D-1)", "zones": list(IDA1_ZONES),
+        "clear_at": (-1, dt.time(15, 0)),
+    },
     "ida2": {
         "market_type": "INTRADAY", "market": "IDA2", "default_offset_days": 1,
         "label": "IDA2", "clears": "22:00 CET/CEST (D-1)", "zones": list(IDA2_ZONES),
         "clear_at": (-1, dt.time(22, 0)),
+    },
+    "ida3": {
+        "market_type": "INTRADAY", "market": "IDA3", "default_offset_days": 0,
+        "label": "IDA3", "clears": "~10:00 CET/CEST (D)", "zones": list(IDA3_ZONES),
+        "clear_at": (0, dt.time(10, 0)),
     },
     # ID1/ID3/IDFULL are EOD continuous-trading VWAP indices (see clients/epex/endpoints/vwap.py),
     # not auctions - not published until the delivery day's continuous trading has fully closed,
     # so (unlike day-ahead/IDA2) they default to yesterday's delivery day rather than today/tomorrow.
     "id1": {
         "market_type": "INTRADAY", "market": "ID1", "default_offset_days": -1,
-        "label": "ID1", "clears": "EOD, ~22:40-23:20 CET/CEST", "zones": list(VWAP_ZONES),
+        "label": "ID1", "clears": "EOD, ~22:40 CET/CEST", "zones": list(VWAP_ZONES),
         "clear_at": (0, dt.time(23, 20)),
     },
     "id3": {
         "market_type": "INTRADAY", "market": "ID3", "default_offset_days": -1,
-        "label": "ID3", "clears": "EOD, ~22:40-23:20 CET/CEST", "zones": list(VWAP_ZONES),
+        "label": "ID3", "clears": "EOD, ~22:40 CET/CEST", "zones": list(VWAP_ZONES),
         "clear_at": (0, dt.time(23, 20)),
     },
     "idfull": {
         "market_type": "INTRADAY", "market": "IDFULL", "default_offset_days": -1,
-        "label": "IDFULL", "clears": "EOD, ~22:40-23:20 CET/CEST", "zones": list(VWAP_ZONES),
+        "label": "IDFULL", "clears": "EOD, ~22:40 CET/CEST", "zones": list(VWAP_ZONES),
         "clear_at": (0, dt.time(23, 20)),
     },
 }

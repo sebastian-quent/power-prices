@@ -130,11 +130,25 @@ def deploy_all() -> set:
         tags=["enex", "day_ahead"],
     ))
 
+    # EPEX intraday IDA1
+    names.add(deploy_flow(
+        entrypoint="clients/epex/endpoints/ida1.py:run",
+        crons=["5,20,35,50 15-16 * * *"],
+        tags=["epex", "intraday", "ida1"],
+    ))
+
     # EPEX intraday IDA2
     names.add(deploy_flow(
         entrypoint="clients/epex/endpoints/ida2.py:run",
         crons=["5,20,35,50 22-23 * * *"],
         tags=["epex", "intraday", "ida2"],
+    ))
+
+    # EPEX intraday IDA3
+    names.add(deploy_flow(
+        entrypoint="clients/epex/endpoints/ida3.py:run",
+        crons=["5,20,35,50 10-11 * * *"],
+        tags=["epex", "intraday", "ida3"],
     ))
 
     # EPEX intraday VWAP

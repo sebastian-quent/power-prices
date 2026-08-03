@@ -15,12 +15,6 @@
       <h1 id="page-title">PRICES</h1>
     </div>
 
-    <div class="day-picker">
-      <button id="prev-day" class="day-nav" aria-label="Previous day">&#8249;</button>
-      <input id="date-input" type="date" aria-label="Delivery day" />
-      <button id="next-day" class="day-nav" aria-label="Next day">&#8250;</button>
-    </div>
-
     <div class="legend">
       <div class="view-toggle" id="view-toggle">
         <button class="view-btn active" data-view="prices">Prices</button>
@@ -38,6 +32,11 @@
     <div id="loader" class="loader"><div class="loader-spinner"></div></div>
 
     <div class="auctions-panel">
+      <div class="day-picker">
+        <button id="prev-day" class="day-nav" aria-label="Previous day">&#8249;</button>
+        <input id="date-input" type="date" aria-label="Delivery day" />
+        <button id="next-day" class="day-nav" aria-label="Next day">&#8250;</button>
+      </div>
       <div class="auctions-title">Auctions</div>
       <div id="auctions-list"></div>
     </div>
