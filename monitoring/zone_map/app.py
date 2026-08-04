@@ -122,17 +122,30 @@ def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+def _is_cleared(target_date: dt.date, opts: dict) -> bool:
+    """whether this market's own clearing time (see MARKET_OPTIONS' clear_at) has already
+    passed for target_date - i.e. whether a missing zone here is a real gap worth flagging
+    rather than just not-published-yet."""
+    now = dt.datetime.now(DELIVERY_DAY_TZ)
+    day_offset, clear_time = opts["clear_at"]
+    return now >= DELIVERY_DAY_TZ.localize(dt.datetime.combine(target_date + dt.timedelta(days=day_offset), clear_time))
+
+
 @app.get("/api/prices")
 def get_prices(date: str | None = None, market: str = "day_ahead") -> dict:
     """price summary per in-scope bidding zone for one market view (see MARKET_OPTIONS).
     `date` is the delivery day (YYYY-MM-DD); defaults to that market's own natural default -
-    tomorrow for day-ahead and IDA2 alike (same D-1 clearing pattern, see MARKET_OPTIONS)."""
+    tomorrow for day-ahead and IDA2 alike (same D-1 clearing pattern, see MARKET_OPTIONS).
+
+    `cleared` tells the map's coverage view whether this market's clearing time has already
+    passed for `date` - a missing zone only reads as a real gap (red) once true; before that
+    it's just not published yet (neutral), see static/app.js's coverageZoneStyle."""
     if market not in MARKET_OPTIONS:
         market = "day_ahead"
     opts = MARKET_OPTIONS[market]
     target_date = dt.date.fromisoformat(date) if date else dt.date.today() + dt.timedelta(days=opts["default_offset_days"])
     zones = build_zone_summary(target_date, market_type=opts["market_type"], market=opts["market"])
-    return {"date": target_date.isoformat(), "market": market, "zones": zones}
+    return {"date": target_date.isoformat(), "market": market, "cleared": _is_cleared(target_date, opts), "zones": zones}
 
 
 @app.get("/api/auctions")
@@ -151,15 +164,13 @@ def get_auctions(date: str | None = None) -> dict:
     fail" spirit as monitoring/completeness.py.
     """
     target_date = dt.date.fromisoformat(date) if date else dt.date.today()
-    now = dt.datetime.now(DELIVERY_DAY_TZ)
     auctions = []
     for key, opts in MARKET_OPTIONS.items():
         summary = build_zone_summary(target_date, market_type=opts["market_type"], market=opts["market"])
         zones = opts["zones"]
         have = sum(1 for zone in zones if summary[zone]["has_data"])
         total = len(zones)
-        day_offset, clear_time = opts["clear_at"]
-        cleared = now >= DELIVERY_DAY_TZ.localize(dt.datetime.combine(target_date + dt.timedelta(days=day_offset), clear_time))
+        cleared = _is_cleared(target_date, opts)
         if have == total:
             status = "complete"
         elif have:

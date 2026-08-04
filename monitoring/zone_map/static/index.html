@@ -25,6 +25,11 @@
         <span class="scale-bar"></span>
         <span id="scale-max"></span>
       </div>
+      <div class="price-scale" id="coverage-scale" hidden>
+        <span class="coverage-label in-db">In DB</span>
+        <span class="scale-bar coverage-bar"><span class="coverage-bar-fill" id="coverage-bar-fill"></span></span>
+        <span class="coverage-label missing">Missing</span>
+      </div>
     </div>
   </header>
 
@@ -39,6 +44,12 @@
       </div>
       <div class="auctions-title">Auctions</div>
       <div id="auctions-list"></div>
+      <div class="coverage-legend" id="coverage-legend">
+        <span class="legend-item"><span class="auction-light complete"></span>Complete</span>
+        <span class="legend-item"><span class="auction-light partial"></span>Partial</span>
+        <span class="legend-item"><span class="auction-light late"></span>Missing</span>
+        <span class="legend-item"><span class="auction-light"></span>Pending</span>
+      </div>
     </div>
   </div>
 

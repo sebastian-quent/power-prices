@@ -57,6 +57,12 @@ let currentMarket = "day_ahead";
 // zoneStyle()/label reading of whatever /api/prices already returned (see selectView below).
 let currentView = "prices";
 
+// whether the currently-selected market has cleared for the currently-selected date (see
+// app.py's get_prices `cleared` field) - a coverage-view zone with no data reads "missing"
+// (red) once true, or just "not published yet" (neutral) while still false. Updated alongside
+// priceByZone on every load/date/market change; not itself part of the per-zone info object.
+let marketCleared = true;
+
 function setActiveAuctionRow() {
   document.querySelectorAll(".auction-row").forEach((row) => {
     row.classList.toggle("active", row.dataset.market === currentMarket);
@@ -81,6 +87,7 @@ function selectView(view) {
   document.querySelectorAll(".view-btn").forEach((btn) => btn.classList.toggle("active", btn.dataset.view === view));
   document.getElementById("page-title").textContent = view === "coverage" ? "COVERAGE" : "PRICES";
   document.getElementById("price-scale").hidden = view !== "prices";
+  document.getElementById("coverage-scale").hidden = view !== "coverage";
   for (const [zoneCode, layer] of zoneLayers) {
     layer.setStyle(zoneStyle(layer._priceInfo));
     layer.setTooltipContent(zoneLabelHtml(zoneCode, layer._priceInfo));
@@ -207,7 +214,13 @@ function zoneCoverage(info) {
 
 function coverageZoneStyle(info) {
   const coverage = zoneCoverage(info);
-  if (coverage === "missing") return noDataStyle();
+  if (coverage === "missing") {
+    // not yet expected (market hasn't cleared for this date) - stays neutral, same as prices
+    // view's "pending" treatment, not a real gap.
+    if (!marketCleared) return noDataStyle();
+    const fill = "#be4242"; // same red as the auctions panel's "late" light
+    return { fillColor: fill, fillOpacity: 0.55, color: fill, weight: 1 };
+  }
   if (coverage === "complete") {
     const fill = cssVar("--brand");
     return { fillColor: fill, fillOpacity: 0.4, color: fill, weight: 1 };
@@ -362,12 +375,25 @@ function updateZone(zoneCode, layer, info) {
   layer.setTooltipContent(zoneLabelHtml(zoneCode, info));
 }
 
-function applyPrices(priceByZone) {
+function applyPrices(priceByZone, cleared) {
+  marketCleared = cleared;
   computePriceRange(priceByZone);
   updateScaleLegend();
+  updateCoverageScale(priceByZone);
   for (const [zoneCode, layer] of zoneLayers) {
     updateZone(zoneCode, layer, priceByZone[zoneCode]);
   }
+}
+
+// coverage view's header bar (replaces the price scale there, see index.html's #coverage-scale)
+// - left-to-right fill is the share of in-scope zones that have any data at all for this
+// market/date, green over a red track, purely illustrative (no counts) per request.
+function updateCoverageScale(priceByZone) {
+  const fill = document.getElementById("coverage-bar-fill");
+  if (!fill) return;
+  const zones = Object.values(priceByZone);
+  const have = zones.filter((z) => z.has_data).length;
+  fill.style.width = zones.length ? `${(have / zones.length) * 100}%` : "0%";
 }
 
 function updateScaleLegend() {
@@ -402,7 +428,7 @@ async function loadPrices(dateStr) {
   if (dateStr) params.set("date", dateStr);
   const prices = await fetch(`/api/prices?${params}`).then((r) => r.json());
   setDateInput(prices.date);
-  applyPrices(prices.zones);
+  applyPrices(prices.zones, prices.cleared);
   loadAuctions(prices.date);
 }
 
@@ -415,10 +441,12 @@ async function main() {
   ]);
 
   const priceByZone = prices.zones;
+  marketCleared = prices.cleared;
   setDateInput(prices.date);
   loadAuctions(prices.date);
   computePriceRange(priceByZone);
   updateScaleLegend();
+  updateCoverageScale(priceByZone);
 
   // zoomSnap/zoomDelta below 1 let the map rest at quarter zoom levels instead of only whole
   // integers - Leaflet's default (zoomSnap: 1) is what makes wheel-zoom feel stepped/jumpy,

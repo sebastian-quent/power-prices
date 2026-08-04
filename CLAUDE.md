@@ -2,6 +2,9 @@
 
 See @project-overview.md for scope, architecture, and iteration plan.
 
+## Docs
+- README.md is a condensed, external-facing summary of project-overview.md. Whenever project-overview.md changes (scope, sources, status), update README.md in the same edit if the change affects what it summarizes - don't let them drift.
+
 ## Layout
 - core/ - logging, utils; PriceStore (dump/retrieve) re-exported from quent_core.database.price_store (no publish/streaming yet, see project-overview.md > Streaming)
 - clients/<source>/client.py - auth + one generic request function reused by every endpoint of that source, no parsing

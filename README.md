@@ -6,9 +6,10 @@ tooling has one place to query instead of per-source formats.
 
 Each bidding zone is covered by at least two independent sources for
 redundancy. Day-ahead is the main scope, fully backfilled and covering all
-in-scope zones; intraday is early - two BE-only EPEX prototypes exist
-(`ida2.py` for the IDA2 auction, `vwap.py` for ID1/ID3/IDFULL VWAPs) ahead of
-being extended to other zones/sources or Prefect-deployed.
+in-scope zones; intraday is early - four BE-only EPEX endpoints are live as a
+test case (`ida1.py`/`ida2.py`/`ida3.py` for the IDA1/IDA2/IDA3 auctions,
+`vwap.py` for ID1/ID3/IDFULL VWAPs), all Prefect-deployed, ahead of being
+extended to other zones/sources.
 
 ## Layout
 
@@ -16,8 +17,9 @@ being extended to other zones/sources or Prefect-deployed.
 - `clients/<source>/client.py` - auth + generic request function for that source
 - `clients/<source>/endpoints/<name>.py` - fetch, parse, dump, `@flow`-decorated `run()`
 - `monitoring/` - `completeness.py` (Prefect flow, zone/market-level data-completeness check
-  across day-ahead, IDA2, and VWAP, separate from flow health); `zone_map/` - FastAPI +
-  plain-JS map dashboard showing per-zone coverage and price level (see Dashboard below)
+  across day-ahead, IDA1, IDA2, IDA3, and VWAP, separate from flow health); `zone_map/` -
+  FastAPI + plain-JS map dashboard showing per-zone coverage and price level (see Dashboard
+  below)
 - `db/migrations/` - DDL for `prod.prices`
 - `scripts/` - one-off backfill/verification drivers, not scheduled
 
@@ -47,9 +49,13 @@ behind paid access, see `project-overview.md`.
 single source (their local scraper isn't built yet); IT also has just one
 (ENTSO-E, split into 7 bidding-zone rows - GME would be its second, not built).
 
-**Intraday** (BE only, prototypes, not yet Prefect-deployed):
+**Intraday** (BE only, test case ahead of other zones, all Prefect-deployed):
 
+- **EPEX IDA1** (`clients/epex/endpoints/ida1.py`) - Pan-European IDA1 auction,
+  backfilled from 2024-06-15
 - **EPEX IDA2** (`clients/epex/endpoints/ida2.py`) - Pan-European IDA2 auction
+- **EPEX IDA3** (`clients/epex/endpoints/ida3.py`) - Pan-European IDA3 auction,
+  backfilled from 2024-06-14
 - **EPEX VWAP** (`clients/epex/endpoints/vwap.py`) - ID1/ID3/IDFULL continuous
   VWAP indices, backfilled to 2024-01-01
 

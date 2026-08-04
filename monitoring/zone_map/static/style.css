@@ -210,12 +210,37 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
+/* the [hidden] attribute alone loses to the class rule above (both display:flex/none at equal
+   specificity, and author CSS always beats the browser's own [hidden] default) - this higher-
+   specificity override is what actually makes toggling `hidden` in app.js's selectView() work. */
+.price-scale[hidden] {
+  display: none;
+}
+
 .scale-bar {
   width: 72px;
   height: 7px;
   border-radius: 4px;
   background: linear-gradient(to right, rgb(86, 156, 92), rgb(214, 168, 62), rgb(190, 66, 66));
 }
+
+/* coverage view's header bar, same slot/sizing as .scale-bar - red track ("missing") with a
+   green fill overlay sized by JS to the actual in-DB share (see app.js updateCoverageScale). */
+.coverage-bar {
+  position: relative;
+  background: #be4242; /* same red as coverage-view "missing" zones / auction-light.late */
+  overflow: hidden;
+}
+
+.coverage-bar-fill {
+  position: absolute;
+  inset: 0;
+  width: 0%;
+  background: var(--brand);
+}
+
+.coverage-label.in-db { color: var(--brand-dark); }
+.coverage-label.missing { color: #be4242; }
 
 /* ---------- map ---------- */
 
@@ -271,6 +296,26 @@ h1 {
   margin-top: 4px;
   padding-top: 7px;
   border-top: 1px solid var(--card-border);
+}
+
+/* small print-out of what every coverage-view color means, docked at the panel's own bottom
+   since it's specifically about reading the auctions/coverage state, not a general map legend -
+   reuses .auction-light's dot colors so the palette is defined in one place. */
+.coverage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 4px;
+  padding: 7px 8px 2px;
+  border-top: 1px solid var(--card-border);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .auction-row {
