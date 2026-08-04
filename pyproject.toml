@@ -30,3 +30,11 @@ python-dateutil = "~=2.9.0"
 [tool.poetry.dependencies.quent_core]
 git = "https://github.com/peter-quent/Core.git"
 rev = "v1.0.161"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.1.1,<10.0.0)"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

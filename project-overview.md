@@ -253,6 +253,32 @@ curve chart, to stay minimal.
   all three geo sources (entsoe-py, Natural Earth, OpenStreetMap/GridKit) via each layer's own
   `attribution:` option rather than one hand-built string.
 
+## Testing
+
+No repo-wide unit test suite. A small pilot (2026-08-04) explored what one would look
+like: `pytest` added as a dev dependency, `pythonpath = ["."]` set in `pyproject.toml`'s
+`[tool.pytest.ini_options]` so absolute `clients.*` imports resolve, and
+`tests/clients/opcom/test_day_ahead.py` covering `parse_response` and `_day_bounds_utc`
+against real OPCOM XML fixtures (captured via a live read-only GET, no DB writes) plus one
+hand-built inline-XML case for a comma-formatted price edge case not present in the
+captured days. Runs manually only (`poetry run pytest`) - no CI or pre-commit hook wired
+up.
+
+Decision: leaving it at the OPCOM pilot for now, not extending to other sources or adding
+CI - evaluated as more overhead than the current gain justifies for a small, fast-paced
+team. Not reverted, just not pursued further; revisit if that calculus changes (e.g. a bug
+that a test would have caught, or the team grows).
+
+Noted but deliberately not acted on, for the same reason: importing any endpoint module
+(even just for its pure parse/`_day_bounds_utc` functions) transitively constructs
+`PriceStore(engine)` at module level, which resolves production DB credentials via a real
+AWS Secrets Manager call (`quent_core`'s `get_engine_quent()` → `load_setting(...,
+resolve_secret=True)`) - confirmed safe (no actual DB connection/query, `create_engine()`
+is lazy) but not free, and requires AWS access in whatever environment runs the tests. The
+fix (defer the `Database.db_connect` import into each endpoint's `dump()`) is mechanical
+but touches every endpoint file - not worth doing while unit testing itself is still just a
+pilot, not a committed direction.
+
 ## Open items
 
 - Migrate Nordpool to its gated v2 data portal — the free API's ~2-month rolling window is the main blocker to full backfill parity across all three main sources. v2 access would also unlock a Nord Pool IDA1-3 source (see Sources' Nordpool entry and Intraday scrapers below) — the free API doesn't serve intraday auctions at all, only v2 does.
@@ -262,6 +288,11 @@ curve chart, to stay minimal.
 - CROPEX (HR), HUPX (HU), GME (IT), BSP Southpool (SI) — not started, blocked on paid/unconfirmed access (see Sources).
 - No Prefect deployment/schedule is live yet for any flow — `Prefect/deploy_flows.py` and `Prefect/run_prefect_worker.bat` are prepared in-repo (see Scheduling), but the `power-prices` work pool hasn't been created on the shared server yet, nothing has been cloned/installed on the `Administrator` box, and no worker or Scheduled Task is running there yet — including for the monitoring flow.
 - Re-enable publishing to `quent-data-stream` once `quent_core`'s streaming rework lands (see Streaming) — expected as a small add-on to `quent_core.database.price_store.PriceStore`, not a rebuild.
+- **Rough list of other code that could eventually move to `quent_core`** (none started, just flagged — revisit once/if other repos need the same thing, same bar `PriceStore` cleared):
+  - `core/logging.py`'s `setup_logging()` — generic idempotent root-logger setup, no repo-specific dependency.
+  - `_day_bounds_utc()` — duplicated across `entsoe`, `opcom`, `enex`, `epex` (`ida.py`), `omie`, `monitoring/completeness.py`, `monitoring/zone_map/zones.py`, `scripts/verify_backfill.py`, and `scripts/backfill_2024.py` (pytz `localize()` + `.astimezone(utc)` pattern). Currently duplicated on purpose per-file rather than shared even within this repo — a `core/` version would settle both the intra-repo and cross-repo duplication at once.
+  - `IN_SCOPE_ZONES` (the 41-zone list) — duplicated across `monitoring/completeness.py`, `monitoring/zone_map/zones.py`, `scripts/verify_backfill.py`, and `monitoring/zone_map/build_geo.py`. Data model already flags this as "revisit as a `core/` constant only if that need actually arises" — arguably already has, within this repo alone.
+  - `core/dev_paths.py`'s sys.path shim is explicitly the opposite of a candidate — it's a temporary bridge into the sibling `Production` repo's `Database.*`, not portable, should disappear rather than move once `quent_core` fully owns the DB layer.
 
 ## Not to forget later
 
