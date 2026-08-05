@@ -33,6 +33,16 @@
         <span class="scale-bar coverage-bar"><span class="coverage-bar-fill" id="coverage-bar-fill"></span></span>
         <span class="coverage-label missing">Missing</span>
       </div>
+      <div class="download-menu" id="download-menu">
+        <button id="download-btn" class="icon-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Download prices" title="Download prices">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19h14"/></svg>
+        </button>
+        <div class="download-panel" id="download-panel" hidden>
+          <div class="download-panel-title">Download CSV</div>
+          <div id="download-list" class="download-list"></div>
+          <button id="download-confirm" class="download-confirm" type="button" disabled>Download</button>
+        </div>
+      </div>
     </div>
   </header>
 

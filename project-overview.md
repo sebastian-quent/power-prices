@@ -317,6 +317,20 @@ curve chart, to stay minimal.
   Leaflet attribution control is re-enabled (styled small/muted, not the stock look) and credits
   all three geo sources (entsoe-py, Natural Earth, OpenStreetMap/GridKit) via each layer's own
   `attribution:` option rather than one hand-built string.
+- **CSV download (2026-08-05)**: a download button in the header, docked at the right edge of
+  `.legend` (`static/index.html`'s `#download-menu`), opens a popover listing every auction from
+  `MARKET_OPTIONS` (grouped Day-ahead/IDA/VWAP, same grouping as the auctions panel) with
+  checkboxes. Auction-only, deliberately no bidding-zone filter - selecting zones too was
+  considered and dropped as too fiddly for the gain. "Download" hits a new `/api/download`
+  endpoint (`date` + comma-separated `markets` keys) which pulls raw per-period rows straight
+  from `PriceStore.get()` via a new `zones.py` `build_price_rows()` - every landed
+  `(bidding_zone, source, valuetime)` row, not the map's own per-zone baseload average/curve -
+  and returns them as `prices_<date>.csv` (`Content-Disposition: attachment`, browser download
+  via a plain navigation rather than fetch+blob). Each row carries both a `local_time` (HH:MM,
+  `DELIVERY_DAY_TZ`) and an authoritative `valuetime_utc` ISO8601 column, so non-EUR zones like
+  GB stay readable without implying a shared price scale. Selected auctions persist in the
+  popover across opens within the session; the currently active auction is only seeded in the
+  first time nothing else is checked yet.
 - **Load-time performance pass (2026-08-05)**: the three geo files had no simplification or
   precision limiting at all — full source-resolution coastlines at a map that never zooms past a
   Europe-wide view. `build_geo.py` now runs `shapely.simplify(preserve_topology=True)` on

@@ -39,6 +39,14 @@ def _day_bounds_utc(date: dt.date) -> tuple[dt.datetime, dt.datetime]:
     return start, end
 
 
+def build_price_rows(target_date: dt.date, market_type: str, market: str) -> pd.DataFrame:
+    """raw per-period price rows for one market/day, for CSV export (see app.py's /api/download)
+    - every (bidding_zone, source) row as landed, not build_zone_summary's per-zone baseload/
+    curve rollup."""
+    start, end = _day_bounds_utc(target_date)
+    return price_store.get(market_type=market_type, market=market, from_valuetime=pd.Timestamp(start), to_valuetime=pd.Timestamp(end))
+
+
 def build_zone_summary(target_date: dt.date, market_type: str = MARKET_TYPE, market: str | None = None) -> dict[str, dict]:
     """one entry per IN_SCOPE_ZONES, keyed by bidding_zone.
 

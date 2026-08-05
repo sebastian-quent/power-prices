@@ -112,7 +112,7 @@ html, body {
 /* glass surfaces (auctions panel, hover card, zoom control, zone chips) fall back to solid,
    blur-free backgrounds for users who've asked the OS for less transparency. */
 @media (prefers-reduced-transparency: reduce) {
-  .auctions-panel, .source-tooltip, .zone-chip, .leaflet-control-zoom a {
+  .auctions-panel, .source-tooltip, .zone-chip, .leaflet-control-zoom a, .download-panel {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     background: var(--card-bg);
@@ -334,6 +334,127 @@ h1 {
 
 .coverage-label.in-db { color: var(--data-good-text); }
 .coverage-label.missing { color: var(--data-bad-text); }
+
+/* ---------- download menu ---------- */
+
+.download-menu {
+  position: relative;
+  display: flex;
+}
+
+/* generic small icon button - same footprint/hover language as .day-nav/.auctions-toggle,
+   just not tied to either's specific markup. */
+.icon-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-default), color var(--duration-fast) var(--ease-default),
+    transform var(--duration-instant) var(--ease-out);
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.icon-btn:hover,
+.icon-btn[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--text);
+}
+
+.icon-btn:active {
+  transform: scale(0.92);
+}
+
+/* auction picker for the CSV export - selecting a subset of auctions was kept, selecting
+   bidding zones too was considered and dropped as too fiddly for the gain. */
+.download-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 600;
+  background: color-mix(in srgb, var(--card-bg) 92%, transparent);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 10px;
+  width: 190px;
+}
+
+.download-panel-title {
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 2px 6px 6px;
+}
+
+.download-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.download-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.download-row:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.download-row input[type="checkbox"] {
+  accent-color: var(--brand-dark);
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+}
+
+.download-confirm {
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 0;
+  border: 1px solid color-mix(in srgb, var(--brand) 55%, var(--card-border));
+  border-radius: 7px;
+  background: transparent;
+  color: var(--brand-dark);
+  font-size: 12px;
+  font-weight: 650;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-default), transform var(--duration-instant) var(--ease-out);
+}
+
+.download-confirm:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
+.download-confirm:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.download-confirm:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 
 /* ---------- map ---------- */
 
@@ -815,16 +936,10 @@ a.leaflet-control-zoom-reset {
    fixed px height that would just get proportionally taller as the card widens. */
 .source-tooltip.expanded .curve-chart { height: auto; aspect-ratio: 2 / 1; margin-top: 12px; }
 
-.chart-fill-a { stop-color: var(--data-good); stop-opacity: 0.35; }
-.chart-fill-b { stop-color: var(--data-good); stop-opacity: 0; }
-
 .chart-line {
   fill: none;
-  stroke: var(--data-good-text);
   stroke-width: 1.5;
 }
-
-.chart-dot { fill: var(--data-good-text); }
 
 .chart-zero {
   stroke: var(--text-muted);
@@ -895,6 +1010,8 @@ a.leaflet-control-zoom-reset {
 .auctions-toggle:focus-visible,
 .expand-btn:focus-visible,
 .view-btn:focus-visible,
+.icon-btn:focus-visible,
+.download-confirm:focus-visible,
 .leaflet-control-zoom a:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 55%, transparent);

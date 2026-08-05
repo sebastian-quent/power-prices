@@ -125,11 +125,19 @@ function focusMarketZones() {
   }
   if (!bounds) return;
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  // asymmetric padding, not a flat [40,40] - the auctions panel is docked top-left over the
+  // asymmetric padding, not a flat value - the auctions panel is docked top-left over the
   // map itself (see index.html), so a tight zoom (e.g. IDA1's single BE polygon today) would
-  // otherwise land straight underneath it. Left/top gets extra room for the panel; the other
-  // two edges keep an ordinary margin.
-  map.flyToBounds(bounds, { paddingTopLeft: [300, 40], paddingBottomRight: [40, 40], animate: !reduceMotion });
+  // otherwise land straight underneath it. Left gets extra room for the panel; the other
+  // three edges keep an ordinary margin (140, doubled again from 70 so a single-zone zoom
+  // like BE stays well clear of the coastline instead of cropping in tight).
+  // duration halved from Leaflet's default auto-computed flight time (~1.2s for this app's
+  // zoom range) to make the zoom-in/out feel twice as quick.
+  map.flyToBounds(bounds, {
+    paddingTopLeft: [300, 140],
+    paddingBottomRight: [140, 140],
+    animate: !reduceMotion,
+    duration: 0.6,
+  });
 }
 
 // switching view is purely a re-render of whatever /api/prices already returned - no new fetch,
@@ -205,6 +213,65 @@ function toggleAuctionsCollapsed() {
   btn.setAttribute("aria-pressed", String(auctionsCollapsed));
   btn.title = auctionsCollapsed ? "Show all auctions" : "Show only selected auction";
   renderAuctions();
+}
+
+// auctions checked in the download panel - persisted across opens/closes within the session
+// (not reset to just currentMarket every time), seeded with currentMarket only the first time
+// the panel opens with nothing selected yet.
+const selectedDownloadMarkets = new Set();
+
+// renders the download panel's auction checkboxes, grouped the same way as the auctions panel
+// (see AUCTION_GROUPS) - deliberately auction-only, no bidding-zone filter (considered and
+// dropped as too fiddly for the gain, see project-overview.md).
+function renderDownloadPanel() {
+  let html = "";
+  let lastGroup = null;
+  for (const key of Object.keys(MARKET_LABELS)) {
+    const group = AUCTION_GROUPS[key] || "";
+    if (group !== lastGroup) {
+      html += `<div class="auction-group-title${lastGroup ? " with-divider" : ""}">${group}</div>`;
+      lastGroup = group;
+    }
+    html += `
+      <label class="download-row">
+        <input type="checkbox" value="${key}" ${selectedDownloadMarkets.has(key) ? "checked" : ""} />
+        <span>${MARKET_LABELS[key]}</span>
+      </label>
+    `;
+  }
+  const list = document.getElementById("download-list");
+  list.innerHTML = html;
+  const confirmBtn = document.getElementById("download-confirm");
+  list.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      if (cb.checked) selectedDownloadMarkets.add(cb.value);
+      else selectedDownloadMarkets.delete(cb.value);
+      confirmBtn.disabled = selectedDownloadMarkets.size === 0;
+    });
+  });
+  confirmBtn.disabled = selectedDownloadMarkets.size === 0;
+}
+
+// forceClose lets outside-click/Escape/after-download close the panel unconditionally,
+// instead of toggling it back open when it's already closed.
+function toggleDownloadPanel(forceClose = false) {
+  const panel = document.getElementById("download-panel");
+  const btn = document.getElementById("download-btn");
+  const opening = panel.hidden && !forceClose;
+  if (opening && selectedDownloadMarkets.size === 0) selectedDownloadMarkets.add(currentMarket);
+  panel.hidden = !opening;
+  btn.setAttribute("aria-expanded", String(opening));
+  if (opening) renderDownloadPanel();
+}
+
+// plain navigation (not fetch+blob) - the response's Content-Disposition header (see app.py's
+// /api/download) makes the browser download it directly instead of navigating away.
+function downloadSelectedPrices() {
+  const dateStr = document.getElementById("date-input").value;
+  if (!selectedDownloadMarkets.size) return;
+  const params = new URLSearchParams({ date: dateStr, markets: [...selectedDownloadMarkets].join(",") });
+  window.location.href = `/api/download?${params}`;
+  toggleDownloadPanel(true);
 }
 
 // hovering the tooltip itself counts as "still hovering the zone" - without this, moving the
@@ -352,7 +419,7 @@ function sourceBreakdownHtml(info) {
     .join("");
 }
 
-function curveChartHtml(info) {
+function curveChartHtml(info, color) {
   if (!info.curve.length) return "";
   const W = 216, H = 56, PAD = 3;
   const prices = info.curve.map((p) => p.price);
@@ -383,7 +450,7 @@ function curveChartHtml(info) {
   const maxIdx = prices.indexOf(hi);
   const minIdx = prices.indexOf(lo);
   // dot sits mid-way across the period's flat segment, not at its leading edge.
-  const dot = (i) => `<circle class="chart-dot" cx="${(xAt(i) + stepX / 2).toFixed(1)}" cy="${yAt(prices[i]).toFixed(1)}" r="2.2" />`;
+  const dot = (i, dotColor) => `<circle class="chart-dot" cx="${(xAt(i) + stepX / 2).toFixed(1)}" cy="${yAt(prices[i]).toFixed(1)}" r="2.2" style="fill:${dotColor}" />`;
 
   return `
     <div class="curve-heading">Baseload curve &mdash; ${info.curve_source}</div>
@@ -391,14 +458,14 @@ function curveChartHtml(info) {
       <svg class="curve-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
         <defs>
           <linearGradient id="fill-${info.curve_source.replace(/\W/g, "")}" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" class="chart-fill-a" />
-            <stop offset="100%" class="chart-fill-b" />
+            <stop offset="0%" style="stop-color:${color};stop-opacity:0.35" />
+            <stop offset="100%" style="stop-color:${color};stop-opacity:0" />
           </linearGradient>
         </defs>
         ${zeroLine}
         <path d="${area}" fill="url(#fill-${info.curve_source.replace(/\W/g, "")})" />
-        <path d="${line}" class="chart-line" />
-        ${dot(maxIdx)}${dot(minIdx)}
+        <path d="${line}" class="chart-line" style="stroke:${color}" />
+        ${dot(maxIdx, color)}${dot(minIdx, color)}
       </svg>
       <div class="chart-hover-line"></div>
       <div class="chart-hover-label"></div>
@@ -465,7 +532,7 @@ function tooltipHtml(zoneCode, info, expanded) {
       ${title}
       <div class="headline" style="color:${headlineColor}">${formatPrice(info)}<span class="headline-label">baseload</span></div>
       <table>${sourceBreakdownHtml(info)}</table>
-      ${curveChartHtml(info)}
+      ${curveChartHtml(info, headlineColor)}
     </div>
   `;
 }
@@ -725,6 +792,15 @@ async function main() {
   });
 
   document.getElementById("auctions-toggle").addEventListener("click", toggleAuctionsCollapsed);
+
+  document.getElementById("download-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleDownloadPanel();
+  });
+  document.getElementById("download-confirm").addEventListener("click", downloadSelectedPrices);
+  document.addEventListener("click", (e) => {
+    if (!document.getElementById("download-menu").contains(e.target)) toggleDownloadPanel(true);
+  });
 
   const loader = document.getElementById("loader");
   if (loader) {

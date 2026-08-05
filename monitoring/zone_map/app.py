@@ -9,8 +9,10 @@ import datetime as dt
 import mimetypes
 from pathlib import Path
 
-from fastapi import FastAPI
+import pandas as pd
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse as IndexFileResponse
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipMiddleware
@@ -21,7 +23,7 @@ from clients.epex.endpoints.ida1 import ZONE_FILE_CONFIG as IDA1_ZONES
 from clients.epex.endpoints.ida2 import ZONE_FILE_CONFIG as IDA2_ZONES
 from clients.epex.endpoints.ida3 import ZONE_FILE_CONFIG as IDA3_ZONES
 from clients.epex.endpoints.vwap import ZONE_FILE_CONFIG as VWAP_ZONES
-from monitoring.zone_map.zones import DELIVERY_DAY_TZ, IN_SCOPE_ZONES, build_zone_summary
+from monitoring.zone_map.zones import DELIVERY_DAY_TZ, IN_SCOPE_ZONES, build_price_rows, build_zone_summary
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -269,3 +271,43 @@ def get_auctions(date: str | None = None) -> dict:
             "have": have, "total": total, "status": status,
         })
     return {"date": target_date.isoformat(), "auctions": auctions}
+
+
+@app.get("/api/download")
+def download_prices(date: str, markets: str) -> Response:
+    """CSV export of raw per-period price rows for one delivery day across one or more selected
+    auctions (see MARKET_OPTIONS) - triggered by the header's download button (static/app.js
+    downloadSelectedPrices). Deliberately auction-only, no bidding-zone filter - selecting zones
+    too was considered and dropped as too fiddly for the gain.
+
+    `markets` is a comma-separated list of MARKET_OPTIONS keys. Rows are exactly what landed
+    (bidding_zone, source, valuetime), not the map's own per-zone baseload average/curve.
+    """
+    target_date = dt.date.fromisoformat(date)
+    keys = [key for key in markets.split(",") if key in MARKET_OPTIONS]
+    if not keys:
+        raise HTTPException(400, "no valid markets selected")
+
+    frames = []
+    for key in keys:
+        opts = MARKET_OPTIONS[key]
+        df = build_price_rows(target_date, opts["market_type"], opts["market"])
+        if df.empty:
+            continue
+        df["auction"] = opts["label"]
+        frames.append(df)
+    if not frames:
+        raise HTTPException(404, "no data for the selected auctions/date")
+
+    combined = pd.concat(frames, ignore_index=True)
+    combined["local_time"] = combined["valuetime"].dt.tz_convert(DELIVERY_DAY_TZ).dt.strftime("%H:%M")
+    combined["valuetime_utc"] = combined["valuetime"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    combined = combined.sort_values(["auction", "bidding_zone", "valuetime"])
+    out = combined[["auction", "bidding_zone", "source", "local_time", "valuetime_utc", "price", "currency", "resolution"]]
+
+    csv_bytes = out.to_csv(index=False).encode("utf-8")
+    filename = f"prices_{target_date.isoformat()}.csv"
+    return Response(
+        content=csv_bytes, media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
