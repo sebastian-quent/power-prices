@@ -203,11 +203,52 @@ coverage and price level geographically rather than as a chip/text list. Has its
 SE1-4, DK1/DK2, and Italy's 7 sub-zones each get their own polygon). Default view is just the
 zone code + price; hover for a card with the per-source completeness breakdown and a price
 curve chart, to stay minimal.
+- **Camera follows the selected auction's own zone list (2026-08-05)**: switching auctions
+  (`static/app.js` `selectMarket`) flies the map to fit just that market's `zones` (the same
+  list `app.py`'s `MARKET_OPTIONS`/`market_zones` already drive the "not applicable" styling
+  from) via a new `focusMarketZones()`, instead of leaving the camera wherever the previous
+  auction left it. Dynamic by construction — reads whatever's currently in each endpoint's
+  `ZONE_FILE_CONFIG`/`INDEX_NAMES`, so it tracks automatically as e.g. IDA1 gets extended past
+  BE-only. Wide auctions like SDAC (39/41 zones) end up close to the existing full-Europe
+  framing; narrow ones (IDA1/IDA2/IDA3 today, all BE-only) zoom in tight on just that
+  country. Uses asymmetric `fitBounds` padding (`paddingTopLeft: [300, 40]`) rather than a flat
+  margin, since the auctions panel is docked top-left over the map and a tight zoom would
+  otherwise land straight underneath it. Doesn't touch `minZoom`/`maxZoom`/`maxBounds` (still
+  the full-Europe extent set up once in `main()`) or the "reset view" button (still resets to
+  that same original full-Europe default, not the current auction's zoomed view) — only the
+  live camera position on an auction switch.
 - **Fill color is price-intensity, not just "has data"**: zones are colored on a per-day
-  green (cheap) → amber → red (expensive) scale, normalized against that day's own min/max
+  muted green (cheap) → amber → red (expensive) scale, normalized against that day's own min/max
   across zones (not a fixed absolute scale — day-ahead levels swing too much day to day for a
   fixed scale to stay informative). Zones with no data yet are off-white/dashed, clearly
-  distinct from "cheap".
+  distinct from "cheap". Both the "no data yet" and "out of scope" greys measured as low as
+  ~1.05 WCAG contrast against the water background gradient (2026-08-05 fix) — functionally
+  invisible — so both were shifted a step further from the water tone in each theme (darker in
+  light mode, lighter in dark mode), now ~1.3-2.2.
+- **Three distinct "no data" categories, each its own grey now (2026-08-05)**: (1) never in
+  scope at all (Russia, ...) - the base context layer; (2) in scope but not this auction (GB
+  under SDAC) - `notApplicableStyle()`; (3) in scope, this auction, just not landed yet
+  ("pending") - `noDataStyle()`. Originally (1) and (2) intentionally shared the context layer's
+  colors ("this map won't show data here for the current view" reads the same either way) and
+  only (3) had a distinct tone - but with only two shades on screen at once this still read as
+  ambiguous, so (2) got its own `--notapplicable-*` tier between the other two. Ramp is lightest
+  (pending, most "alive") to darkest (context, "ignore me") - `--context-fill` also darkened
+  further per explicit request ("Russia should be pretty dark, but not as dark as the water").
+  A dashed border for pending was tried first but dropped - didn't like the look.
+- **Data colors are kept separate from the company brand color** (`--brand: #77bd46`) even
+  though both happen to land in the green family: `--data-good`/`--data-warn`/`--data-bad` (plus
+  `-text` variants for small dots/labels, and a slightly more saturated `--auction-*` set
+  specifically for the auctions panel's traffic-light dots) are muted rather than bright, and
+  `--data-good` is a distinct blue-leaning teal-green rather than brand's yellow-green hue — a
+  data fill can't be mistaken for "the brand color." Brand green itself is reserved for
+  decorative accents only: the header's app-icon logomark (also the favicon — a plain glowing
+  dot there previously read as an unintended "live" indicator this app doesn't have), and thin
+  selection edges/rings (view toggle, selected auction row, today's date, loader spinner).
+- **Translucent glass panels** (`backdrop-filter`) on the elements that actually float over the
+  map — auctions panel, hover card, zone chips, zoom control — plus tightened typography tracking
+  on the hover card's large price readout and `prefers-reduced-motion`/
+  `prefers-reduced-transparency` fallbacks. Styled using the `apple-design` skill (installed
+  globally to `~/.claude/skills/`, not part of this repo).
 - **Currency correctness matters here**: only zones actually priced in EUR feed that scale.
   Checked against real landed data (not assumed from the `currency` column's stated possible
   values) - in practice every SDAC/SEM_DA zone lands in EUR, *including* CH and the Nordics
@@ -240,6 +281,18 @@ curve chart, to stay minimal.
   ratio look cut off at the edges (flat empty background where the bbox ended) - real grey
   landmass under a restricted camera looks intentional instead. Re-run the build script only if
   upstream shapes change.
+- **France/Norway double-layering bug (found and fixed 2026-08-05)**: `build_context_geojson()`
+  excluded in-scope countries from the context layer by matching Natural Earth's `ISO_A2`
+  property against `COVERED_ISO_A2` - but Natural Earth stores `ISO_A2` as the sentinel `-99`
+  (its marker for countries with complex/disputed sovereignty status) for France and Norway
+  specifically, so both fell through the exclusion check. Their full Natural Earth country
+  outline was left in `context.geojson`, drawn at full opacity *underneath* the zones layer's
+  own (differently-sourced, entsoe-py) FR/NO1-5 shapes - visible wherever the two didn't line up
+  exactly, worst along Norway's coastline, read as "the grey area for these zones looks
+  different/bigger than the real border." Fixed by preferring Natural Earth's `ISO_A2_EH`
+  ("extended"/de-facto) field, which carries the real code for exactly this case, falling back to
+  `ISO_A2` for everything else; `context.geojson` regenerated (217 → 215 features). All other
+  `COVERED_ISO_A2` entries checked clean - this was specific to FR/NO.
 - Leaflet vendored locally under `static/vendor/leaflet/` (BSD-2-Clause) rather than a CDN, so
   the page has no runtime internet dependency.
 - **`static/geo/grid.geojson`** — Europe's high-voltage transmission lines, rendered as an

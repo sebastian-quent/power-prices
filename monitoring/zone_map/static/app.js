@@ -1,11 +1,19 @@
 const FILL_OPACITY = 0.62;
 
+function hexToRgb(hex) {
+  const m = hex.trim().match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [0, 0, 0];
+}
+
 // price -> color, green (cheap) through amber to red (expensive) - normalized per-day against
 // the *current* day's own min/max, not a fixed absolute scale, since day-ahead price levels
 // swing a lot day to day and a fixed scale would go flat/uninformative on calm days.
-const PRICE_LOW = [86, 156, 92];
-const PRICE_MID = [214, 168, 62];
-const PRICE_HIGH = [190, 66, 66];
+// read from CSS (style.css --data-good/-warn/-bad) rather than duplicated as hardcoded RGB -
+// those tones and the header's .scale-bar gradient drifted apart once already from being kept
+// as separate copies, so this is the one place they're defined, both other spots read from here.
+const PRICE_LOW = hexToRgb(getComputedStyle(document.documentElement).getPropertyValue("--data-good"));
+const PRICE_MID = hexToRgb(getComputedStyle(document.documentElement).getPropertyValue("--data-warn"));
+const PRICE_HIGH = hexToRgb(getComputedStyle(document.documentElement).getPropertyValue("--data-bad"));
 
 // only zones actually priced in EUR feed the price-intensity scale. in practice that's every
 // SDAC/SEM_DA zone (including CH and the Nordics, whose day-ahead auction clears in EUR even
@@ -38,19 +46,23 @@ let closeTimer = null;
 
 // display label for the empty-note in the hover card only - mirrors app.py's MARKET_OPTIONS keys
 const MARKET_LABELS = {
-  day_ahead: "day-ahead", ida1: "IDA1", ida2: "IDA2", ida3: "IDA3", id1: "ID1", id3: "ID3", idfull: "IDFULL",
+  sdac: "SDAC", n2ex: "N2EX", epex_gb_hourly: "EPEX GB Hourly", gb_hh: "GB HalfHourly",
+  epex_gb_hh: "EPEX GB HalfHourly", sem_da: "SEM-DA",
+  ida1: "IDA1", ida2: "IDA2", ida3: "IDA3", id1: "ID1", id3: "ID3", idfull: "IDFULL",
 };
 
-// groups the auctions panel into Day-ahead / IDA1-3 / VWAP sections - purely a rendering
-// grouping (see loadAuctions), mirrors app.py's MARKET_OPTIONS ordering rather than driving it.
+// groups the auctions panel into Day-ahead / IDA / VWAP sections - purely a rendering grouping
+// (see loadAuctions), mirrors app.py's MARKET_OPTIONS ordering rather than driving it.
 const AUCTION_GROUPS = {
-  day_ahead: "Day-ahead", ida1: "IDA", ida2: "IDA", ida3: "IDA", id1: "VWAP", id3: "VWAP", idfull: "VWAP",
+  sdac: "Day-ahead", n2ex: "Day-ahead", epex_gb_hourly: "Day-ahead", gb_hh: "Day-ahead",
+  epex_gb_hh: "Day-ahead", sem_da: "Day-ahead",
+  ida1: "IDA", ida2: "IDA", ida3: "IDA", id1: "VWAP", id3: "VWAP", idfull: "VWAP",
 };
 
-// mirrors app.py's MARKET_OPTIONS keys - only used as the startup default (tomorrow for
-// day-ahead and IDA2 alike, yesterday for the VWAP indices, see MARKET_OPTIONS); once loaded,
+// mirrors app.py's MARKET_OPTIONS keys - only used as the startup default (tomorrow for SDAC
+// and IDA2 alike, yesterday for the VWAP indices, see MARKET_OPTIONS); once loaded,
 // selectMarket() carries the currently selected date through instead of resetting to it.
-let currentMarket = "day_ahead";
+let currentMarket = "sdac";
 
 // "prices" (default) is the existing green->red price-intensity map; "coverage" is a quick
 // have-we-got-it-at-all overview - same map/zones/data, no extra API call, just a different
@@ -63,20 +75,61 @@ let currentView = "prices";
 // priceByZone on every load/date/market change; not itself part of the per-zone info object.
 let marketCleared = true;
 
+// zones the *currently selected market* can ever cover (app.py's get_prices `market_zones`,
+// e.g. just GB for N2EX, 39 zones for SDAC) - distinct from the full 41-zone IN_SCOPE_ZONES that
+// `priceByZone` always covers. A zone outside this set (e.g. GB/IE under SDAC) will never have
+// data for this market, so it's styled/labelled as "not applicable" rather than "no data yet"
+// (which would wrongly imply it's merely pending, or read as a real gap once cleared).
+let currentMarketZones = new Set();
+
+// whether the auctions panel is collapsed to just the currently selected auction - default is
+// expanded (every auction shown, grouped), same as before this toggle existed. Cached alongside
+// the last /api/auctions response so toggling re-renders instantly without a re-fetch.
+let auctionsCollapsed = false;
+let lastAuctionsData = null;
+
 function setActiveAuctionRow() {
   document.querySelectorAll(".auction-row").forEach((row) => {
     row.classList.toggle("active", row.dataset.market === currentMarket);
   });
 }
 
-function selectMarket(market) {
+async function selectMarket(market) {
   if (market === currentMarket) return;
   currentMarket = market;
   setActiveAuctionRow();
   // the date picker is the source of truth once the page has loaded (day-ahead/tomorrow is
   // only the startup default) - switching auctions must not jump the date back to that
   // auction's own default, so the currently selected date is passed through explicitly.
-  loadPrices(document.getElementById("date-input").value);
+  await loadPrices(document.getElementById("date-input").value);
+  // currentMarketZones is only known once loadPrices' /api/prices response lands (see
+  // applyPrices), so the camera fit has to wait for that - a market covering just a
+  // handful of zones (e.g. IDA1, BE-only today) zooms in on them instead of staying at
+  // whatever zoom level the previous market left the map at. Dynamic by construction: it
+  // reads the market's live `zones` list (see app.py MARKET_OPTIONS), so it keeps tracking
+  // correctly as more zones get activated for a given market.
+  focusMarketZones();
+}
+
+// fits the camera to just the zones the current market actually covers - a no-op-ish framing
+// for wide markets like SDAC (close to the full map already), a real zoom-in for narrow ones.
+// Does not touch minZoom/maxZoom/maxBounds (still the full-Europe extent set up in main()), so
+// panning back out to see the rest of the map still works regardless of the selected market.
+function focusMarketZones() {
+  if (!map) return;
+  let bounds = null;
+  for (const zoneCode of currentMarketZones) {
+    const layer = zoneLayers.get(zoneCode);
+    if (!layer) continue;
+    bounds = bounds ? bounds.extend(layer.getBounds()) : layer.getBounds();
+  }
+  if (!bounds) return;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // asymmetric padding, not a flat [40,40] - the auctions panel is docked top-left over the
+  // map itself (see index.html), so a tight zoom (e.g. IDA1's single BE polygon today) would
+  // otherwise land straight underneath it. Left/top gets extra room for the panel; the other
+  // two edges keep an ordinary margin.
+  map.flyToBounds(bounds, { paddingTopLeft: [300, 40], paddingBottomRight: [40, 40], animate: !reduceMotion });
 }
 
 // switching view is purely a re-render of whatever /api/prices already returned - no new fetch,
@@ -89,7 +142,7 @@ function selectView(view) {
   document.getElementById("price-scale").hidden = view !== "prices";
   document.getElementById("coverage-scale").hidden = view !== "coverage";
   for (const [zoneCode, layer] of zoneLayers) {
-    layer.setStyle(zoneStyle(layer._priceInfo));
+    layer.setStyle(zoneStyle(layer._priceInfo, zoneCode));
     layer.setTooltipContent(zoneLabelHtml(zoneCode, layer._priceInfo));
   }
 }
@@ -106,30 +159,52 @@ function auctionRowHtml(a) {
   `;
 }
 
-// auctions panel: status per auction for whatever date is currently on the map (dateStr comes
-// straight from the resolved /api/prices date, see loadPrices/main below) - so paging back to
-// an already-backfilled day shows e.g. 41/41 there, not always the live day's own status.
-async function loadAuctions(dateStr) {
-  const params = dateStr ? `?date=${dateStr}` : "";
-  const data = await fetch(`/api/auctions${params}`).then((r) => r.json());
-  const list = document.getElementById("auctions-list");
+// renders whatever /api/auctions last returned, from lastAuctionsData - split out from
+// loadAuctions so toggling auctionsCollapsed re-renders instantly without a re-fetch.
+function renderAuctions() {
+  if (!lastAuctionsData) return;
+  const rows = auctionsCollapsed
+    ? lastAuctionsData.auctions.filter((a) => a.key === currentMarket)
+    : lastAuctionsData.auctions;
   // group headers (Day-ahead / IDA / VWAP) - a thin divider + small title whenever the group
   // changes, skipping the divider on the very first group so the panel title isn't doubled up.
+  // Collapsed view is just the one selected row, so group headers would be redundant noise.
   let html = "";
   let lastGroup = null;
-  for (const a of data.auctions) {
-    const group = AUCTION_GROUPS[a.key] || "";
-    if (group !== lastGroup) {
-      html += `<div class="auction-group-title${lastGroup ? " with-divider" : ""}">${group}</div>`;
-      lastGroup = group;
+  for (const a of rows) {
+    if (!auctionsCollapsed) {
+      const group = AUCTION_GROUPS[a.key] || "";
+      if (group !== lastGroup) {
+        html += `<div class="auction-group-title${lastGroup ? " with-divider" : ""}">${group}</div>`;
+        lastGroup = group;
+      }
     }
     html += auctionRowHtml(a);
   }
+  const list = document.getElementById("auctions-list");
   list.innerHTML = html;
   list.querySelectorAll(".auction-row").forEach((row) => {
     row.addEventListener("click", () => selectMarket(row.dataset.market));
   });
   setActiveAuctionRow();
+}
+
+// auctions panel: status per auction for whatever date is currently on the map (dateStr comes
+// straight from the resolved /api/prices date, see loadPrices/main below) - so paging back to
+// an already-backfilled day shows e.g. 41/41 there, not always the live day's own status.
+async function loadAuctions(dateStr) {
+  const params = dateStr ? `?date=${dateStr}` : "";
+  lastAuctionsData = await fetch(`/api/auctions${params}`).then((r) => r.json());
+  renderAuctions();
+}
+
+function toggleAuctionsCollapsed() {
+  auctionsCollapsed = !auctionsCollapsed;
+  const btn = document.getElementById("auctions-toggle");
+  btn.classList.toggle("collapsed", auctionsCollapsed);
+  btn.setAttribute("aria-pressed", String(auctionsCollapsed));
+  btn.title = auctionsCollapsed ? "Show all auctions" : "Show only selected auction";
+  renderAuctions();
 }
 
 // hovering the tooltip itself counts as "still hovering the zone" - without this, moving the
@@ -180,8 +255,9 @@ function priceToColor(price) {
 
 // in-scope zone, just no rows landed yet for this day ("pending") - low fillOpacity keeps it
 // close to the map's own background so it doesn't compete for attention with priced zones,
-// while still reading as a distinct, lighter shade from the context layer's dark grey
-// (out-of-scope zones, see the context.geojson style() below). shared by both views.
+// while still reading as the lightest/most "alive" of the three no-data greys (see
+// notApplicableStyle and the context layer below) - the closer a zone is to actually getting
+// data, the more visually prominent its grey. shared by both views.
 function noDataStyle() {
   return {
     fillColor: cssVar("--nodata-fill"), fillOpacity: 0.4,
@@ -189,7 +265,23 @@ function noDataStyle() {
   };
 }
 
-function priceZoneStyle(info) {
+// zone this market will never cover (e.g. GB/IE under SDAC) - not "pending", not a gap, but
+// still distinct from the context layer's "never in scope at all" grey (e.g. Russia): both mean
+// "no data here", but one is a real bidding zone just outside this particular auction, the other
+// isn't tracked at all. Unlike the context layer itself (bottom of the stack, grid drawn on top
+// of it), these zone shapes sit above the grid line layer - full opacity here would blot out the
+// grid lines under this zone instead of just tinting them, looking like a hole punched in the
+// map. Partial opacity keeps the same muted look while letting the grid show through. shared by
+// both views.
+function notApplicableStyle() {
+  return {
+    fillColor: cssVar("--notapplicable-fill"), fillOpacity: 0.55,
+    color: cssVar("--notapplicable-stroke"), weight: 1,
+  };
+}
+
+function priceZoneStyle(info, zoneCode) {
+  if (!currentMarketZones.has(zoneCode)) return notApplicableStyle();
   if (info && info.has_data && info.currency === SCALE_CURRENCY) {
     const fill = priceToColor(info.avg_price);
     return { fillColor: fill, fillOpacity: FILL_OPACITY, color: fill, weight: 1 };
@@ -212,25 +304,26 @@ function zoneCoverage(info) {
   return info.sources.some((s) => s.actual >= s.expected) ? "complete" : "partial";
 }
 
-function coverageZoneStyle(info) {
+function coverageZoneStyle(info, zoneCode) {
+  if (!currentMarketZones.has(zoneCode)) return notApplicableStyle();
   const coverage = zoneCoverage(info);
   if (coverage === "missing") {
     // not yet expected (market hasn't cleared for this date) - stays neutral, same as prices
     // view's "pending" treatment, not a real gap.
     if (!marketCleared) return noDataStyle();
-    const fill = "#be4242"; // same red as the auctions panel's "late" light
+    const fill = cssVar("--data-bad"); // same as the auctions panel's "late" light
     return { fillColor: fill, fillOpacity: 0.55, color: fill, weight: 1 };
   }
   if (coverage === "complete") {
-    const fill = cssVar("--brand");
+    const fill = cssVar("--data-good");
     return { fillColor: fill, fillOpacity: 0.4, color: fill, weight: 1 };
   }
-  const fill = "#fab219"; // same amber used for "partial" elsewhere (auction light, source dot)
+  const fill = cssVar("--data-warn"); // same used for "partial" elsewhere (auction light, source dot)
   return { fillColor: fill, fillOpacity: 0.55, color: fill, weight: 1 };
 }
 
-function zoneStyle(info) {
-  return currentView === "coverage" ? coverageZoneStyle(info) : priceZoneStyle(info);
+function zoneStyle(info, zoneCode) {
+  return currentView === "coverage" ? coverageZoneStyle(info, zoneCode) : priceZoneStyle(info, zoneCode);
 }
 
 function formatPrice(info) {
@@ -249,7 +342,7 @@ function sourceBreakdownHtml(info) {
   return info.sources
     .map((s) => {
       const complete = s.actual >= s.expected;
-      const dotColor = complete ? "#0ca30c" : "#fab219";
+      const dotColor = complete ? cssVar("--data-good-text") : cssVar("--data-warn-text");
       return `<tr>
         <td><span class="status-dot" style="background:${dotColor}"></span>${s.source} (${s.market})</td>
         <td>${s.actual}/${s.expected}</td>
@@ -353,30 +446,39 @@ function bindChartHover(root, info, expanded) {
   });
 }
 
+// corner-bracket "enter/exit fullscreen" glyphs (same visual language as Apple's own SF Symbols
+// arrow.up.left.and.arrow.down.right / arrow.down.right.and.arrow.up.left) rather than the
+// Unicode ⤡/⤢ glyphs previously used here, which render inconsistently across fonts/platforms.
+const EXPAND_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10V4h6"/><path d="M20 14v6h-6"/></svg>`;
+const COLLAPSE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4"/><path d="M15 20v-5h5"/></svg>`;
+
 function tooltipHtml(zoneCode, info, expanded) {
   const name = ZONE_NAMES[zoneCode] || "";
-  const expandBtn = `<button class="expand-btn" aria-label="${expanded ? "Collapse" : "Expand"}" title="${expanded ? "Collapse" : "Expand"}">${expanded ? "&#10529;" : "&#10530;"}</button>`;
+  const expandBtn = `<button class="expand-btn" aria-label="${expanded ? "Collapse" : "Expand"}" title="${expanded ? "Collapse" : "Expand"}">${expanded ? COLLAPSE_ICON : EXPAND_ICON}</button>`;
   const title = `<div class="zone-title">${zoneCode}<span class="zone-name">${name}</span>${expandBtn}</div>`;
   if (!info || !info.has_data) {
-    return `${title}<div class="empty-note">no ${MARKET_LABELS[currentMarket]} data yet</div>`;
+    return `<div class="tooltip-inner">${title}<div class="empty-note">no ${MARKET_LABELS[currentMarket]} data yet</div></div>`;
   }
   const headlineColor = info.currency === SCALE_CURRENCY ? priceToColor(info.avg_price) : cssVar("--noneur-stroke");
   return `
-    ${title}
-    <div class="headline" style="color:${headlineColor}">${formatPrice(info)}<span class="headline-label">baseload</span></div>
-    <table>${sourceBreakdownHtml(info)}</table>
-    ${curveChartHtml(info)}
+    <div class="tooltip-inner">
+      ${title}
+      <div class="headline" style="color:${headlineColor}">${formatPrice(info)}<span class="headline-label">baseload</span></div>
+      <table>${sourceBreakdownHtml(info)}</table>
+      ${curveChartHtml(info)}
+    </div>
   `;
 }
 
 function updateZone(zoneCode, layer, info) {
   layer._priceInfo = info; // read by the mouseover handler below, always the latest fetch
-  layer.setStyle(zoneStyle(info));
+  layer.setStyle(zoneStyle(info, zoneCode));
   layer.setTooltipContent(zoneLabelHtml(zoneCode, info));
 }
 
-function applyPrices(priceByZone, cleared) {
+function applyPrices(priceByZone, cleared, marketZones) {
   marketCleared = cleared;
+  currentMarketZones = new Set(marketZones);
   computePriceRange(priceByZone);
   updateScaleLegend();
   updateCoverageScale(priceByZone);
@@ -387,11 +489,14 @@ function applyPrices(priceByZone, cleared) {
 
 // coverage view's header bar (replaces the price scale there, see index.html's #coverage-scale)
 // - left-to-right fill is the share of in-scope zones that have any data at all for this
-// market/date, green over a red track, purely illustrative (no counts) per request.
+// market/date, green over a red track, purely illustrative (no counts) per request. Denominator
+// is currentMarketZones, not every key in priceByZone - a market that only ever covers a handful
+// of zones (e.g. N2EX, just GB) should be able to read 100%, not stall at a fraction because the
+// other 40 zones it was never going to cover count against it.
 function updateCoverageScale(priceByZone) {
   const fill = document.getElementById("coverage-bar-fill");
   if (!fill) return;
-  const zones = Object.values(priceByZone);
+  const zones = [...currentMarketZones].map((zoneCode) => priceByZone[zoneCode]).filter(Boolean);
   const have = zones.filter((z) => z.has_data).length;
   fill.style.width = zones.length ? `${(have / zones.length) * 100}%` : "0%";
 }
@@ -428,7 +533,7 @@ async function loadPrices(dateStr) {
   if (dateStr) params.set("date", dateStr);
   const prices = await fetch(`/api/prices?${params}`).then((r) => r.json());
   setDateInput(prices.date);
-  applyPrices(prices.zones, prices.cleared);
+  applyPrices(prices.zones, prices.cleared, prices.market_zones);
   loadAuctions(prices.date);
 }
 
@@ -442,6 +547,7 @@ async function main() {
 
   const priceByZone = prices.zones;
   marketCleared = prices.cleared;
+  currentMarketZones = new Set(prices.market_zones);
   setDateInput(prices.date);
   loadAuctions(prices.date);
   computePriceRange(priceByZone);
@@ -457,7 +563,7 @@ async function main() {
     attributionControl: true, zoomControl: false, worldCopyJump: false, maxBoundsViscosity: 1.0,
     zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 100,
   });
-  L.control.zoom({ position: "topright" }).addTo(map);
+  const zoomControl = L.control.zoom({ position: "topright" }).addTo(map);
   map.attributionControl.setPrefix(false);
 
   L.geoJSON(contextGeo, {
@@ -477,7 +583,7 @@ async function main() {
 
   const zonesLayer = L.geoJSON(zonesGeo, {
     attribution: "Zones: EnergieID/entsoe-py",
-    style: (feature) => zoneStyle(priceByZone[feature.properties.bidding_zone]),
+    style: (feature) => zoneStyle(priceByZone[feature.properties.bidding_zone], feature.properties.bidding_zone),
     onEachFeature: (feature, layer) => {
       const zoneCode = feature.properties.bidding_zone;
       layer._priceInfo = priceByZone[zoneCode];
@@ -492,6 +598,9 @@ async function main() {
       // add/move/remove by hand - two bindTooltip calls on the same layer would just replace
       // each other instead of coexisting.
       layer.on("mouseover", () => {
+        // this market will never cover this zone (e.g. GB/IE under SDAC) - no hover card at
+        // all, not even a "no data" one, since there's nothing pending to report.
+        if (!currentMarketZones.has(zoneCode)) return;
         cancelClose();
         layer.setStyle({ weight: 2 });
         if (hoverTooltip) map.removeLayer(hoverTooltip);
@@ -544,16 +653,47 @@ async function main() {
   }).addTo(map);
 
   const europeBounds = zonesLayer.getBounds();
-  map.fitBounds(europeBounds, { padding: [16, 16] });
+  // padding 30 (was 16) for a touch of extra default zoom-out, then panBy shifts the settled
+  // view right so the now-taller auctions panel (12 auctions across 3 groups, docked top-left)
+  // doesn't start out overlapping IE/GB. setMaxBounds below is derived from *this* shifted view
+  // (map.getBounds(), not the raw europeBounds) - deriving it from the raw bounds instead would
+  // re-clamp the view straight back to center, undoing the panBy the moment it's applied.
+  map.fitBounds(europeBounds, { padding: [30, 30] });
+  map.panBy([-80, 0], { animate: false });
 
   // lock the camera to "all of Europe" as the widest view and a generously padded version of
-  // the same box as the pan limit. context.geojson itself covers the whole world (so panning
-  // shows real grey landmass, not empty background, if these limits are ever loosened) - this
-  // restriction is purely about what's useful to look at, not a workaround for missing data.
+  // the shifted default view as the pan limit. context.geojson itself covers the whole world (so
+  // panning shows real grey landmass, not empty background, if these limits are ever loosened) -
+  // this restriction is purely about what's useful to look at, not a workaround for missing data.
   map.setMinZoom(map.getZoom());
   map.setMaxZoom(map.getZoom() + 6);
-  map.setMaxBounds(europeBounds.pad(0.25));
+  map.setMaxBounds(map.getBounds().pad(0.25));
   window.addEventListener("resize", () => map.invalidateSize());
+
+  // "reset view" button stacked above zoom in/out, inserted into the same Leaflet control bar
+  // (not a separate control) so it picks up leaflet.css's own stacked-button borders/corner
+  // rounding for free. Resets to the exact center/zoom the map settled on above (post
+  // fitBounds+panBy+clamp), not a re-run of fitBounds - re-running fitBounds here would recompute
+  // against zonesLayer's raw bounds and skip the panBy shift, landing on a different view than
+  // what the user actually started on.
+  const defaultCenter = map.getCenter();
+  const defaultZoom = map.getZoom();
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const resetLink = L.DomUtil.create("a", "leaflet-control-zoom-reset");
+  resetLink.href = "#";
+  resetLink.title = "Reset view";
+  resetLink.setAttribute("role", "button");
+  resetLink.setAttribute("aria-label", "Reset view");
+  // four corner brackets ("viewfinder"/fit-to-frame icon) rather than a house - same corner-
+  // bracket language as the hover card's own expand/collapse icons above, just closed into a
+  // full frame instead of two opposing corners.
+  resetLink.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V4h4"/><path d="M20 8V4h-4"/><path d="M4 16v4h4"/><path d="M20 16v4h-4"/></svg>`;
+  L.DomEvent.disableClickPropagation(resetLink);
+  L.DomEvent.on(resetLink, "click", L.DomEvent.stop).on(resetLink, "click", () => {
+    map.setView(defaultCenter, defaultZoom, { animate: !reduceMotion });
+  });
+  const zoomContainer = zoomControl.getContainer();
+  zoomContainer.insertBefore(resetLink, zoomContainer.firstChild);
 
   const dateInput = document.getElementById("date-input");
   document.getElementById("prev-day").addEventListener("click", () => loadPrices(shiftDate(dateInput.value, -1)));
@@ -563,6 +703,8 @@ async function main() {
   document.querySelectorAll(".view-btn").forEach((btn) => {
     btn.addEventListener("click", () => selectView(btn.dataset.view));
   });
+
+  document.getElementById("auctions-toggle").addEventListener("click", toggleAuctionsCollapsed);
 
   const loader = document.getElementById("loader");
   if (loader) {

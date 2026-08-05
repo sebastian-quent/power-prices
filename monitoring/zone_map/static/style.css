@@ -1,18 +1,37 @@
 :root {
   --brand: #77bd46;
   --brand-dark: #5c9636;
-  /* pending: in-scope zone, no rows landed yet for this day - kept close to the map's own
-     background tone (low fillOpacity in app.js on top of this) so it stays out of the way
-     rather than competing for attention with priced zones. */
-  --nodata-fill: #e7e7e5;
-  --nodead-stroke: #cfcfcc;
-  /* context: everything outside IN_SCOPE_ZONES - never scraped, a mid grey so the two
-     read as clearly different shades without the dark tone overpowering a light background. */
-  --context-fill: #8c8c88;
-  --context-stroke: #6f6f6b;
+  /* data-encoding colors (price scale, coverage status, chart line/fill, auction lights) -
+     deliberately a different hue family from --brand (muted teal-green rather than brand's
+     yellow-green) and dialed back from the original neon tones, but muted rather than washed-out
+     pastel - still meant to read clearly as a color, not a tint. -text variants are a touch
+     deeper/more saturated, for small dots/labels where the fill tone would be too soft. */
+  --data-good: #5a9c82;
+  --data-good-text: #3a8066;
+  --data-warn: #cea35a;
+  --data-warn-text: #b3823a;
+  --data-bad: #c46a61;
+  --data-bad-text: #a84f46;
+  /* auction card's traffic-light dots specifically - same hues as the -text tier above, a touch
+     more saturated since these are the one place in the redesign meant to read like a literal
+     traffic light at a glance, not a muted data tone. */
+  --auction-good: #2e8f6c;
+  --auction-warn: #c98a2e;
+  --auction-bad: #b8483c;
+  /* three-tier no-data grey, lightest/most "alive" to darkest/most "ignore me": pending (in-scope
+     zone, this auction, just no rows yet) > not-applicable (in-scope zone, but not this auction,
+     e.g. GB under SDAC) > context (never in scope at all, e.g. Russia). Each step also has to
+     clear the water gradient below it - the original single pending/context pair measured as low
+     as ~1.02 WCAG contrast against --map-bg-outer here, functionally invisible. */
+  --nodata-fill: #c8c8c6;
+  --nodead-stroke: #a6a6a3;
+  --notapplicable-fill: #a3a39f;
+  --notapplicable-stroke: #87877f;
+  --context-fill: #6c6c69;
+  --context-stroke: #55554f;
   --bg: #f5f5f3;
-  --map-bg-inner: #eeeeec;
-  --map-bg-outer: #e0e0dc;
+  --map-bg-inner: #f1f1ef;
+  --map-bg-outer: #e5e5e1;
   --text: #232323;
   --text-muted: #6b6b6b;
   --card-bg: #ffffff;
@@ -22,18 +41,42 @@
   --noneur-fill: #c7d3e0;
   --noneur-stroke: #94a7ba;
   --grid-line: rgba(170, 130, 55, 0.3);
+  /* HIG-standard motion curves - --ease-default for hover/state transitions, --ease-out for
+     tap/press feedback, --ease-spring for the one "grow in place" interaction (hover card
+     expand) that benefits from a touch of overshoot. Not theme-dependent, so declared once. */
+  --ease-default: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-out: cubic-bezier(0, 0, 0.58, 1);
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --duration-instant: 100ms;
+  --duration-fast: 200ms;
+  --duration-normal: 300ms;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --brand-dark: #96d666;
-    --nodata-fill: #232220;
-    --nodead-stroke: #302e29;
-    --context-fill: #121110;
-    --context-stroke: #1c1b18;
+    --data-good: #6eb096;
+    --data-good-text: #82c4a8;
+    --data-warn: #d8af69;
+    --data-warn-text: #e2be82;
+    --data-bad: #ce7e74;
+    --data-bad-text: #d89288;
+    --auction-good: #5fd1a0;
+    --auction-warn: #eaba5e;
+    --auction-bad: #e2776a;
+    /* same three-tier ramp as light mode (pending lightest, context darkest) - both original
+       greys measured near-invisible against --map-bg-outer here (~1.05-1.13 WCAG contrast),
+       hence lightened overall, but context is kept close to the dark end ("pretty dark", per
+       explicit request) rather than lightened as much as pending. */
+    --nodata-fill: #5c5c5c;
+    --nodead-stroke: #6d6d6d;
+    --notapplicable-fill: #464646;
+    --notapplicable-stroke: #575757;
+    --context-fill: #2e2e2e;
+    --context-stroke: #3e3e3e;
     --bg: #15150f;
-    --map-bg-inner: #1c1c17;
-    --map-bg-outer: #0f0f0c;
+    --map-bg-inner: #2b2b23;
+    --map-bg-outer: #1e1e18;
     --text: #eceae4;
     --text-muted: #9a9890;
     --card-bg: #201f1c;
@@ -53,8 +96,27 @@ html, body {
   height: 100%;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-optical-sizing: auto;
   background: var(--bg);
   color: var(--text);
+}
+
+/* kill decorative motion for users who asked for less of it - the loader spinner and tooltip
+   materialize effect are the only non-essential animations in this dashboard (everything else
+   is an instant color/background transition, already fine). */
+@media (prefers-reduced-motion: reduce) {
+  .loader-spinner { animation: none; }
+  .source-tooltip .tooltip-inner { animation: none; }
+}
+
+/* glass surfaces (auctions panel, hover card, zoom control, zone chips) fall back to solid,
+   blur-free backgrounds for users who've asked the OS for less transparency. */
+@media (prefers-reduced-transparency: reduce) {
+  .auctions-panel, .source-tooltip, .zone-chip, .leaflet-control-zoom a {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--card-bg);
+  }
 }
 
 body {
@@ -83,12 +145,12 @@ header {
   min-width: 0;
 }
 
-.brand-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--brand);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 25%, transparent);
+/* small app icon/logomark, not a status dot - a bare glowing circle next to a title reads as
+   "live"/notification, which this dashboard has no such signal for (it's a periodic snapshot,
+   not a live feed) - a flat icon tile reads unambiguously as a brand mark instead. */
+.brand-mark {
+  width: 18px;
+  height: 18px;
   flex: 0 0 auto;
 }
 
@@ -113,20 +175,44 @@ h1 {
 }
 
 .day-nav {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 26px;
   height: 26px;
   border: none;
   border-radius: 50%;
   background: transparent;
   color: var(--text);
-  font-size: 1rem;
-  line-height: 1;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--duration-fast) var(--ease-default), transform var(--duration-instant) var(--ease-out);
+}
+
+.day-nav svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* enlarges the clickable area without changing the drawn size - capped at 34px (not the full
+   44pt HIG minimum) because prev/next sit only 4px from the date input on either side; a full
+   44px hit box would overlap it. */
+.day-nav::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 34px;
+  height: 34px;
+  transform: translate(-50%, -50%);
 }
 
 .day-nav:hover {
-  background: color-mix(in srgb, var(--brand) 22%, transparent);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.day-nav:active {
+  transform: scale(0.9);
 }
 
 #date-input {
@@ -154,8 +240,7 @@ h1 {
 }
 
 .day-picker:has(#date-input.is-today) {
-  background: color-mix(in srgb, var(--brand) 18%, var(--nodata-fill));
-  border-color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 55%, var(--card-border));
 }
 
 @media (prefers-color-scheme: dark) {
@@ -191,16 +276,24 @@ h1 {
   padding: 5px 12px;
   border-radius: 999px;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--duration-fast) var(--ease-default), color var(--duration-fast) var(--ease-default),
+    transform var(--duration-instant) var(--ease-out), box-shadow var(--duration-fast) var(--ease-default);
 }
 
 .view-btn:hover {
   color: var(--text);
 }
 
+.view-btn:active {
+  transform: scale(0.94);
+}
+
+/* selected state reads as a raised, distinct pill - brand shows up only as a thin ring, not a
+   full color fill, so the toggle stays legible without turning into a green block in the header. */
 .view-btn.active {
-  background: var(--brand);
-  color: #fff;
+  background: var(--card-bg);
+  color: var(--text);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 45%, transparent), 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .price-scale {
@@ -221,14 +314,14 @@ h1 {
   width: 72px;
   height: 7px;
   border-radius: 4px;
-  background: linear-gradient(to right, rgb(86, 156, 92), rgb(214, 168, 62), rgb(190, 66, 66));
+  background: linear-gradient(to right, var(--data-good), var(--data-warn), var(--data-bad));
 }
 
 /* coverage view's header bar, same slot/sizing as .scale-bar - red track ("missing") with a
    green fill overlay sized by JS to the actual in-DB share (see app.js updateCoverageScale). */
 .coverage-bar {
   position: relative;
-  background: #be4242; /* same red as coverage-view "missing" zones / auction-light.late */
+  background: var(--data-bad); /* same as coverage-view "missing" zones / auction-light.late */
   overflow: hidden;
 }
 
@@ -236,11 +329,11 @@ h1 {
   position: absolute;
   inset: 0;
   width: 0%;
-  background: var(--brand);
+  background: var(--data-good);
 }
 
-.coverage-label.in-db { color: var(--brand-dark); }
-.coverage-label.missing { color: #be4242; }
+.coverage-label.in-db { color: var(--data-good-text); }
+.coverage-label.missing { color: var(--data-bad-text); }
 
 /* ---------- map ---------- */
 
@@ -265,12 +358,21 @@ h1 {
   top: 14px;
   left: 14px;
   z-index: 450;
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
+  background: color-mix(in srgb, var(--card-bg) 80%, transparent);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid color-mix(in srgb, var(--card-border) 75%, transparent);
   border-radius: 10px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
   padding: 8px;
   min-width: 168px;
+}
+
+.auctions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
 }
 
 .auctions-title {
@@ -280,6 +382,70 @@ h1 {
   letter-spacing: 0.04em;
   color: var(--text-muted);
   padding: 2px 8px 6px;
+}
+
+.auctions-header .auctions-title {
+  padding: 2px 0 6px 8px;
+}
+
+/* collapses the panel to just the currently selected auction's row - the chevron rotates to
+   point at the active state rather than needing two separate icons. */
+.auctions-toggle {
+  position: relative;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 0 4px 4px 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-default), color var(--duration-fast) var(--ease-default),
+    transform var(--duration-instant) var(--ease-out);
+}
+
+/* enlarges the clickable area without changing the drawn size - see .day-nav::before above for
+   the general technique; this control has more breathing room (panel padding on one side, the
+   non-interactive title label on the other) so it can reach the full 40px. */
+.auctions-toggle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  transform: translate(-50%, -50%);
+}
+
+.auctions-toggle:hover {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--text);
+}
+
+.auctions-toggle:active {
+  transform: scale(0.9);
+}
+
+.auctions-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  height: 10px;
+  transition: transform var(--duration-fast) var(--ease-default);
+}
+
+.auctions-toggle-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.auctions-toggle.collapsed .auctions-toggle-icon {
+  transform: rotate(-90deg);
 }
 
 .auction-group-title {
@@ -325,15 +491,18 @@ h1 {
   padding: 6px 8px;
   border-radius: 7px;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--duration-fast) var(--ease-default), box-shadow var(--duration-fast) var(--ease-default);
 }
 
 .auction-row:hover {
-  background: color-mix(in srgb, var(--brand) 15%, transparent);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
+/* selected auction gets a thin brand-colored edge, same restrained accent language as the
+   source-tooltip's left border below - brand marks "this is the selected one", never a fill. */
 .auction-row.active {
-  background: color-mix(in srgb, var(--brand) 24%, transparent);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  box-shadow: inset 3px 0 0 var(--brand);
 }
 
 .auction-light {
@@ -344,9 +513,9 @@ h1 {
   background: var(--nodead-stroke); /* pending */
 }
 
-.auction-light.partial { background: #fab219; }
-.auction-light.complete { background: #0ca30c; }
-.auction-light.late { background: #be4242; } /* same red as the price scale's expensive end */
+.auction-light.partial { background: var(--auction-warn); }
+.auction-light.complete { background: var(--auction-good); }
+.auction-light.late { background: var(--auction-bad); }
 
 .auction-main {
   display: flex;
@@ -377,7 +546,7 @@ h1 {
   justify-content: center;
   background: var(--bg);
   z-index: 1000;
-  transition: opacity 0.25s ease;
+  transition: opacity var(--duration-normal) var(--ease-default);
 }
 
 .loader.hidden {
@@ -408,12 +577,29 @@ h1 {
 .leaflet-control-zoom a {
   background: var(--control-bg) !important;
   color: var(--text) !important;
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
   border: none !important;
+  transition: background var(--duration-fast) var(--ease-default);
 }
 
 .leaflet-control-zoom a:hover {
-  background: color-mix(in srgb, var(--brand) 20%, var(--control-bg)) !important;
+  background: color-mix(in srgb, var(--text) 12%, var(--control-bg)) !important;
+}
+
+/* the reset-view button stacked above zoom in/out - a plain <a> inserted into the same Leaflet
+   bar (see app.js), so it inherits the background/hover/backdrop-filter rules above for free.
+   Only needs its own flex-centering for the SVG child, since leaflet.css's own text-align/
+   line-height centering was written for the +/- text glyphs, not an icon. */
+a.leaflet-control-zoom-reset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.leaflet-control-zoom-reset svg {
+  width: 14px;
+  height: 14px;
 }
 
 .leaflet-control-attribution {
@@ -438,7 +624,8 @@ h1 {
 
 .zone-chip {
   background: var(--label-bg);
-  backdrop-filter: blur(3px);
+  backdrop-filter: blur(6px) saturate(160%);
+  -webkit-backdrop-filter: blur(6px) saturate(160%);
   border-radius: 7px;
   padding: 2px 7px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
@@ -465,7 +652,9 @@ h1 {
 /* ---------- hover card ---------- */
 
 .source-tooltip {
-  background: var(--card-bg);
+  background: color-mix(in srgb, var(--card-bg) 88%, transparent);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
   border: 1px solid var(--card-border);
   border-left: 3px solid var(--brand);
   border-radius: 9px;
@@ -474,6 +663,19 @@ h1 {
   font-size: 12px;
   padding: 10px 12px;
   min-width: 190px;
+}
+
+/* content wrapper (not the tooltip element itself, which Leaflet positions via its own
+   translate3d transform) - materializes in place rather than just fading, per the same "glass
+   surfaces arrive, they don't just appear" idea used for the card's translucency. */
+.source-tooltip .tooltip-inner {
+  animation: tooltip-materialize 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-origin: bottom center;
+}
+
+@keyframes tooltip-materialize {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 .source-tooltip::before { display: none; }
@@ -493,7 +695,7 @@ h1 {
   margin-bottom: 2px;
 }
 
-.source-tooltip.expanded .zone-title { font-size: 19px; margin-bottom: 6px; }
+.source-tooltip.expanded .zone-title { font-size: 19px; margin-bottom: 6px; letter-spacing: -0.005em; }
 
 .source-tooltip .zone-title .zone-name {
   font-weight: 400;
@@ -503,23 +705,51 @@ h1 {
 }
 
 .source-tooltip .expand-btn {
+  position: relative;
   margin-left: auto;
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1;
-  padding: 2px 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
   border-radius: 5px;
   cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-default), color var(--duration-fast) var(--ease-default),
+    transform var(--duration-instant) var(--ease-out);
+}
+
+.source-tooltip .expand-btn svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* enlarges the clickable area without changing the drawn size - see .day-nav::before above;
+   capped at 36px, slightly short of the full 44pt minimum, so it doesn't spill past the card's
+   own rounded corner in the compact (unexpanded) state. */
+.source-tooltip .expand-btn::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 36px;
+  height: 36px;
+  transform: translate(-50%, -50%);
 }
 
 .source-tooltip .expand-btn:hover {
-  background: color-mix(in srgb, var(--brand) 20%, transparent);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
   color: var(--text);
 }
 
-.source-tooltip.expanded .expand-btn { font-size: 16px; }
+.source-tooltip .expand-btn:active {
+  transform: scale(0.9);
+}
+
+.source-tooltip.expanded .expand-btn { width: 18px; height: 18px; }
 
 .source-tooltip .headline {
   font-size: 15px;
@@ -527,7 +757,7 @@ h1 {
   margin-bottom: 8px;
 }
 
-.source-tooltip.expanded .headline { font-size: 30px; margin-bottom: 14px; }
+.source-tooltip.expanded .headline { font-size: 30px; margin-bottom: 14px; letter-spacing: -0.015em; }
 
 .source-tooltip .headline-label {
   font-size: 10px;
@@ -585,16 +815,16 @@ h1 {
    fixed px height that would just get proportionally taller as the card widens. */
 .source-tooltip.expanded .curve-chart { height: auto; aspect-ratio: 2 / 1; margin-top: 12px; }
 
-.chart-fill-a { stop-color: var(--brand); stop-opacity: 0.35; }
-.chart-fill-b { stop-color: var(--brand); stop-opacity: 0; }
+.chart-fill-a { stop-color: var(--data-good); stop-opacity: 0.35; }
+.chart-fill-b { stop-color: var(--data-good); stop-opacity: 0; }
 
 .chart-line {
   fill: none;
-  stroke: var(--brand-dark);
+  stroke: var(--data-good-text);
   stroke-width: 1.5;
 }
 
-.chart-dot { fill: var(--brand-dark); }
+.chart-dot { fill: var(--data-good-text); }
 
 .chart-zero {
   stroke: var(--text-muted);
@@ -648,6 +878,30 @@ h1 {
 
 .source-tooltip.expanded .chart-minmax { font-size: 12px; margin-top: 6px; }
 
+/* the one place a spring curve earns its keep - growing to the expanded card is closer to a
+   sheet presentation than a hover-state tweak, so it gets a touch of overshoot the other
+   micro-transitions above deliberately don't. */
 .source-tooltip {
-  transition: min-width 0.18s ease, padding 0.18s ease;
+  transition: min-width var(--duration-normal) var(--ease-spring), padding var(--duration-normal) var(--ease-spring);
+}
+
+/* ---------- focus states ---------- */
+
+/* keyboard/VoiceOver focus ring - same thin brand-colored ring language as the view-toggle's own
+   selected-state indicator, not a full outline. Placed last so it wins the cascade even on
+   controls with their own box-shadow (e.g. .view-btn.active). None of these controls had any
+   focus treatment before; without this, tabbing through the panel showed nothing at all. */
+.day-nav:focus-visible,
+.auctions-toggle:focus-visible,
+.expand-btn:focus-visible,
+.view-btn:focus-visible,
+.leaflet-control-zoom a:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 55%, transparent);
+}
+
+#date-input:focus-visible {
+  outline: none;
+  border-radius: 6px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 55%, transparent);
 }

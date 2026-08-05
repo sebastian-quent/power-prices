@@ -111,7 +111,11 @@ def build_context_geojson(ne_countries: dict) -> dict:
     """
     features = []
     for feature in ne_countries["features"]:
-        iso_a2 = feature["properties"].get("ISO_A2")
+        # plain ISO_A2 is "-99" for France and Norway in this dataset (Natural Earth's sentinel
+        # for disputed/complex sovereignty cases) - falls through the exclusion check below,
+        # leaving their full country outline double-drawn under the zones layer's own FR/NO1-5
+        # shapes. ISO_A2_EH ("extended"/de-facto) carries the real code for exactly this case.
+        iso_a2 = feature["properties"].get("ISO_A2_EH") or feature["properties"].get("ISO_A2")
         if iso_a2 in COVERED_ISO_A2:
             continue
         features.append(

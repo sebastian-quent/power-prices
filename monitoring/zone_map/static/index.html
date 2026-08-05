@@ -4,14 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>EUROPEAN PRICE MAP</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='13' fill='%2377bd46'/></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='1' y='1' width='30' height='30' rx='8' fill='%2377bd46'/><path d='M17 6 8 18h6l-1 8 9-12h-6l1-8z' fill='white'/></svg>" />
   <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <header>
     <div class="brand">
-      <span class="brand-dot"></span>
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="1" y="1" width="30" height="30" rx="8" fill="var(--brand)" />
+        <path d="M17 6 8 18h6l-1 8 9-12h-6l1-8z" fill="#fff" />
+      </svg>
       <h1 id="page-title">PRICES</h1>
     </div>
 
@@ -38,11 +41,22 @@
 
     <div class="auctions-panel">
       <div class="day-picker">
-        <button id="prev-day" class="day-nav" aria-label="Previous day">&#8249;</button>
+        <button id="prev-day" class="day-nav" aria-label="Previous day">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
         <input id="date-input" type="date" aria-label="Delivery day" />
-        <button id="next-day" class="day-nav" aria-label="Next day">&#8250;</button>
+        <button id="next-day" class="day-nav" aria-label="Next day">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
       </div>
-      <div class="auctions-title">Auctions</div>
+      <div class="auctions-header">
+        <div class="auctions-title">Auctions</div>
+        <button id="auctions-toggle" class="auctions-toggle" type="button" aria-pressed="false" aria-label="Show only selected auction" title="Show only selected auction">
+          <span class="auctions-toggle-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </span>
+        </button>
+      </div>
       <div id="auctions-list"></div>
       <div class="coverage-legend" id="coverage-legend">
         <span class="legend-item"><span class="auction-light complete"></span>Complete</span>
