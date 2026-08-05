@@ -281,6 +281,18 @@ curve chart, to stay minimal.
   ratio look cut off at the edges (flat empty background where the bbox ended) - real grey
   landmass under a restricted camera looks intentional instead. Re-run the build script only if
   upstream shapes change.
+- **Zone shapes clipped to the real coastline (2026-08-05)**: entsoe-py's multi-zone-country
+  shapes (Norway, Sweden, Italy) are custom-drawn envelopes that smooth across every fjord/island
+  rather than tracing the coast - left unclipped, Norway's NO1-5 union measured **34% larger**
+  than its real Natural Earth 10m landmass, worst in NO4 which bulged visibly out to sea.
+  `build_geo.py`'s `_clip_to_land()` now intersects every entsoe-py zone polygon against the
+  Natural Earth land outline (the same 50m data already fetched for the context/GB/IE layer) via
+  a new `BIDDING_ZONE_TO_CLIP_ISO_A2` mapping (DE clips against DE+LU combined; IT's 7 sub-zones
+  all clip against the whole IT outline). Applied uniformly, not just to NO/SE/IT, since clipping
+  an already-coastline-accurate zone (the single-zone countries, sourced from Natural Earth to
+  begin with) against its own country is a no-op. Adds `shapely` as a dev-only Poetry dependency
+  (used only by this build script, not at runtime). Verified by rendering the clipped output -
+  all 41 zones hug their real coastline with no empty/malformed geometries.
 - **France/Norway double-layering bug (found and fixed 2026-08-05)**: `build_context_geojson()`
   excluded in-scope countries from the context layer by matching Natural Earth's `ISO_A2`
   property against `COVERED_ISO_A2` - but Natural Earth stores `ISO_A2` as the sentinel `-99`
@@ -305,6 +317,29 @@ curve chart, to stay minimal.
   Leaflet attribution control is re-enabled (styled small/muted, not the stock look) and credits
   all three geo sources (entsoe-py, Natural Earth, OpenStreetMap/GridKit) via each layer's own
   `attribution:` option rather than one hand-built string.
+- **Load-time performance pass (2026-08-05)**: the three geo files had no simplification or
+  precision limiting at all — full source-resolution coastlines at a map that never zooms past a
+  Europe-wide view. `build_geo.py` now runs `shapely.simplify(preserve_topology=True)` on
+  zones/context (tolerances `ZONE_SIMPLIFY_TOLERANCE=0.003`/`CONTEXT_SIMPLIFY_TOLERANCE=0.01`
+  degrees — zones stays more detailed since it's the interactive/hovered layer) and rounds every
+  coordinate to 5 decimals (`COORD_DECIMALS`, ~1m precision) on all three files, including
+  grid.geojson (whose links are already minimal 2-point segments, so rounding is the only lever
+  there). Cut combined gzip payload from ~2.66MB to ~1.04MB (zones.geojson alone: 3.28MB → 0.54MB
+  raw) with no visible difference at this map's zoom range — spot-checked directly in-browser
+  before proceeding, Norway's fjords and Italy's coastline included. Three more changes ride
+  along: `build_geo.py` now also writes a precomputed `.gz` sibling per file (`_write_geojson()`),
+  served directly by `app.py`'s `CachedStaticFiles.file_response()` when the client accepts gzip
+  (checked via a `.gz`-suffixed path lookup, falling back to the plain file otherwise) — avoids
+  GZipMiddleware recompressing these multi-MB files from scratch on every request; the `/static/geo`
+  mount's `Cache-Control` went from `max-age=3600` to `max-age=604800` (still not `immutable`,
+  since a manual rebuild changes the file in place with no URL/version bump — deliberately cautious
+  given this project's own prior stale-cache incident, see the `/static` mount's own comment in
+  `app.py`); and `static/app.js` now fetches `grid.geojson` *after* the interactive map (context +
+  zones) is already up, on its own Leaflet pane (`grid-pane`, z-index between context and zones)
+  so stacking stays correct regardless of load timing — grid is decorative and doesn't need to gate
+  first paint. Context and grid also switched from Leaflet's default SVG renderer to `L.canvas()`
+  (grid alone was ~18,800 separate `LineString` features, i.e. ~18,800 SVG DOM nodes previously);
+  zones stays on SVG since it needs per-feature hover/tooltip interactivity.
 
 ## Testing
 

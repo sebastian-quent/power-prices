@@ -537,10 +537,27 @@ async function loadPrices(dateStr) {
   loadAuctions(prices.date);
 }
 
+// grid.geojson is purely decorative (see project-overview.md) - fetched separately, after the
+// interactive map is already up, so its ~2.5MB doesn't gate first paint on top of context/zones.
+// Runs on its own pane (z-index between context and zones, see main()) so stacking stays correct
+// no matter when this resolves relative to the rest of main()'s setup.
+function loadGridLayer(map) {
+  fetch("/static/geo/grid.geojson")
+    .then((r) => r.json())
+    .then((gridGeo) => {
+      L.geoJSON(gridGeo, {
+        interactive: false,
+        attribution: "Grid: &copy; OpenStreetMap contributors, via GridKit (ODbL)",
+        pane: "grid-pane",
+        renderer: L.canvas({ pane: "grid-pane" }),
+        style: () => ({ color: cssVar("--grid-line"), weight: 0.6, opacity: 1 }),
+      }).addTo(map);
+    });
+}
+
 async function main() {
-  const [contextGeo, gridGeo, zonesGeo, prices] = await Promise.all([
+  const [contextGeo, zonesGeo, prices] = await Promise.all([
     fetch("/static/geo/context.geojson").then((r) => r.json()),
-    fetch("/static/geo/grid.geojson").then((r) => r.json()),
     fetch("/static/geo/zones.geojson").then((r) => r.json()),
     fetch(`/api/prices?market=${currentMarket}`).then((r) => r.json()),
   ]);
@@ -566,19 +583,22 @@ async function main() {
   const zoomControl = L.control.zoom({ position: "topright" }).addTo(map);
   map.attributionControl.setPrefix(false);
 
+  // dedicated panes (below zones' default overlayPane, z-index 400) so the background layers
+  // stack correctly (context < grid < zones) regardless of add order - needed because grid loads
+  // asynchronously after everything else, see loadGridLayer.
+  map.createPane("context-pane").style.zIndex = 200;
+  map.createPane("grid-pane").style.zIndex = 300;
+
+  // canvas renderer, not the default SVG - context/grid are non-interactive background layers
+  // (215 and ~19k features respectively), and SVG would mean one <path> DOM node per feature.
+  // Canvas draws them all onto a single element instead, far cheaper to parse/paint. Zones stays
+  // on the default SVG renderer since it needs per-feature hover/tooltip interactivity.
   L.geoJSON(contextGeo, {
     interactive: false,
     attribution: "Natural Earth",
+    pane: "context-pane",
+    renderer: L.canvas({ pane: "context-pane" }),
     style: () => ({ fillColor: cssVar("--context-fill"), fillOpacity: 1, color: cssVar("--context-stroke"), weight: 1 }),
-  }).addTo(map);
-
-  // faint, purely decorative - not meant to be noticed at a glance (see project-overview.md).
-  // real attribution matters here though: ODbL requires it for the produced map, not just the
-  // license name in a code comment.
-  L.geoJSON(gridGeo, {
-    interactive: false,
-    attribution: "Grid: &copy; OpenStreetMap contributors, via GridKit (ODbL)",
-    style: () => ({ color: cssVar("--grid-line"), weight: 0.6, opacity: 1 }),
   }).addTo(map);
 
   const zonesLayer = L.geoJSON(zonesGeo, {
@@ -711,6 +731,8 @@ async function main() {
     loader.classList.add("hidden");
     setTimeout(() => loader.remove(), 300);
   }
+
+  loadGridLayer(map);
 }
 
 main();

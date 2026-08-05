@@ -6,12 +6,16 @@ run with: poetry run uvicorn monitoring.zone_map.app:app --reload
 """
 
 import datetime as dt
+import mimetypes
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse as IndexFileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipMiddleware
+from starlette.responses import FileResponse
+from starlette.staticfiles import NotModifiedResponse
 
 from clients.epex.endpoints.ida1 import ZONE_FILE_CONFIG as IDA1_ZONES
 from clients.epex.endpoints.ida2 import ZONE_FILE_CONFIG as IDA2_ZONES
@@ -128,15 +132,30 @@ SDAC_DEFAULT_SWITCH_TIME = dt.time(12, 50)
 
 class CachedStaticFiles(StaticFiles):
     """StaticFiles with a fixed Cache-Control header - how aggressively a given mount can be
-    cached depends entirely on how often its files actually change (see mounts below)."""
+    cached depends entirely on how often its files actually change (see mounts below).
+
+    Also serves a precomputed `.gz` sibling directly when the client accepts gzip and one exists
+    (see build_geo.py's `_write_geojson`) - the geo files are large enough (multi-MB) that
+    GZipMiddleware recompressing them from scratch on every single request is real, avoidable
+    CPU cost when the content only changes on an occasional manual rebuild."""
 
     def __init__(self, *args, cache_control: str, **kwargs):
         super().__init__(*args, **kwargs)
         self._cache_control = cache_control
 
-    def file_response(self, *args, **kwargs):
-        response = super().file_response(*args, **kwargs)
+    def file_response(self, full_path, stat_result, scope, status_code: int = 200):
+        request_headers = Headers(scope=scope)
+        gz_path = Path(f"{full_path}.gz")
+        if "gzip" in request_headers.get("accept-encoding", "") and gz_path.is_file():
+            media_type = mimetypes.guess_type(str(full_path))[0] or "application/octet-stream"
+            response = FileResponse(gz_path, status_code=status_code, stat_result=gz_path.stat(), media_type=media_type)
+            response.headers["Content-Encoding"] = "gzip"
+            if self.is_not_modified(response.headers, request_headers):
+                response = NotModifiedResponse(response.headers)
+        else:
+            response = super().file_response(full_path, stat_result, scope, status_code=status_code)
         response.headers["Cache-Control"] = self._cache_control
+        response.headers.setdefault("Vary", "Accept-Encoding")
         return response
 
 
@@ -145,9 +164,15 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # most specific mounts first - Starlette matches in registration order, so /static/geo and
 # /static/vendor need to be checked before the catch-all /static mount below.
+# max-age=1 week (was 1 hour) - these are hand-committed build artifacts (see build_geo.py's
+# module docstring: "run manually... whenever upstream shapes are updated"), not something that
+# changes on a normal deploy, so an hour of freshness was needlessly forcing a multi-MB re-fetch
+# on every dashboard session past that window. Deliberately not `immutable` - the file can still
+# change in place on a rebuild without a URL/version bump, and this project has already been
+# burned once by a too-aggressive stale-cache assumption (see the /static mount's own comment).
 app.mount(
     "/static/geo",
-    CachedStaticFiles(directory=STATIC_DIR / "geo", cache_control="public, max-age=3600"),
+    CachedStaticFiles(directory=STATIC_DIR / "geo", cache_control="public, max-age=604800"),
     name="geo",
 )
 app.mount(
@@ -162,8 +187,8 @@ app.mount("/static", CachedStaticFiles(directory=STATIC_DIR, cache_control="no-c
 
 
 @app.get("/")
-def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+def index() -> IndexFileResponse:
+    return IndexFileResponse(STATIC_DIR / "index.html")
 
 
 def _is_cleared(target_date: dt.date, opts: dict) -> bool:
