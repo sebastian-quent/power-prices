@@ -1,0 +1,35 @@
+services:
+  # ───────────────────────────────────────────────
+  # power-prices dashboard
+  # DB password is a materialized Docker secret (scripts/materialize_runtime_secrets.py) -
+  # this container has no live AWS access, unlike local dev's get_engine_quent() path.
+  # ───────────────────────────────────────────────
+  power_prices:
+    build: .
+    container_name: power_prices
+    environment:
+      DB_HOST: "${DB_HOST}"
+      DB_USER: "${DB_USER}"
+      DB_PASSWORD_FILE: "/run/secrets/power_prices_db_password"
+    secrets:
+      - power_prices_db_password
+    ports:
+      - "${DASHBOARD_PORT:-8080}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
+        reservations:
+          memory: 128m
+
+secrets:
+  power_prices_db_password:
+    file: ./.runtime/db/password

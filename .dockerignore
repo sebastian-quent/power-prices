@@ -1,0 +1,16 @@
+.git
+.venv
+__pycache__
+*.pyc
+
+.env
+.env.*
+.runtime
+runtime
+
+.idea
+.vscode
+.claude
+
+output
+*.drawio

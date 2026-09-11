@@ -1,5 +1,5 @@
-from core import dev_paths  # noqa: F401  (adds sibling Production repo to sys.path for Database.* imports)
+from core.db import get_engine
 from core.logging import setup_logging
 from quent_core.database.price_store import PriceStore
 
-__all__ = ["PriceStore", "setup_logging"]
+__all__ = ["PriceStore", "get_engine", "setup_logging"]

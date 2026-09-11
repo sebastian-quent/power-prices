@@ -1,89 +1,70 @@
 # power-prices
 
-Scrapers that collect European day-ahead electricity prices from multiple
-sources and land them in a single, consistent Postgres table, so trading
-tooling has one place to query instead of per-source formats.
+Dashboard for European day-ahead (and intraday) electricity prices landed by the sibling
+[`scrapers`](../scrapers) repo into a single Postgres table, so trading tooling has one place to
+query instead of per-source formats. This repo is dashboard-only - it visualizes coverage/price
+level; the actual fetch/parse/dump/backfill/completeness-monitoring all live in `scrapers`.
 
-Each bidding zone is covered by at least two independent sources for
-redundancy. Day-ahead is the main scope, fully backfilled and covering all
-in-scope zones; intraday is early - four BE-only EPEX endpoints are live as a
-test case (`ida1.py`/`ida2.py`/`ida3.py` for the IDA1/IDA2/IDA3 auctions,
-`vwap.py` for ID1/ID3/IDFULL VWAPs), all Prefect-deployed, ahead of being
-extended to other zones/sources.
+Each bidding zone is covered by at least two independent sources for redundancy, day-ahead is
+fully backfilled across all in-scope zones, and four BE-only EPEX intraday endpoints are live as
+a test case — see `scrapers`' own README/`project-overview.md` for source-by-source detail.
 
 ## Layout
 
-- `core/` - logging, utils; `PriceStore` (dump/retrieve) now lives in `quent_core`
-- `clients/<source>/client.py` - auth + generic request function for that source
-- `clients/<source>/endpoints/<name>.py` - fetch, parse, dump, `@flow`-decorated `run()`
-- `monitoring/` - `completeness.py` (Prefect flow, zone/market-level data-completeness check
-  across day-ahead, IDA1, IDA2, IDA3, and VWAP, separate from flow health); `zone_map/` -
-  FastAPI + plain-JS map dashboard showing per-zone coverage and price level (see Dashboard
-  below)
-- `db/migrations/` - DDL for `prod.prices`
-- `scripts/` - one-off backfill/verification drivers, not scheduled
+- `core/` - logging, utils; `PriceStore` (`.get()` only from here - dump/retrieve lives in
+  `quent_core`)
+- `dashboard/` - FastAPI + plain-JS map dashboard showing per-zone coverage and price level
+  (see Dashboard below)
+
+This repo has no dependency on `scrapers`' code - per-auction zone lists come from a live
+`prod.prices` query (`dashboard/zones.py` `get_market_zones()`, see project-overview.md >
+Dashboard) rather than importing `clients`. See the `scrapers` repo itself for `client.py`/
+`endpoints/<name>.py` layout, per-source behavior, scraper scheduling, backfill scripts,
+data-completeness monitoring, and the DDL for `prod.prices`.
 
 `PriceStore` (from `quent_core.database.price_store`) writes to `prod.prices` only for
 now - publishing to `quent-data-stream` (NATS JetStream, stream `PRICES`) moved to
 `quent_core` along with the class and is temporarily disabled while that module is
-reworked upstream; see `project-overview.md` > Streaming for details.
-
-## Sources
-
-Live and landing rows in `prod.prices`:
-
-- **Nordpool** - all zones except GB's batch call, plus a separate GB endpoint (`N2EX_DayAhead` + `GbHalfHour_DayAhead`); free API only serves a rolling ~2-month history
-- **EPEX** - 20 zones incl. GB and DK2
-- **ENTSO-E** - 34 of 35 zones (GB excluded, see `project-overview.md`)
-- **OTE** (Czech Republic) - CZ, SOAP/zeep
-- **SEMO** (Ireland) - IE
-- **OPCOM** (Romania) - RO
-- **OMIE** (Spain/Portugal) - ES, PT (joint MIBEL auction)
-- **ENEX** (Greece) - GR
-- **OKTE** (Slovakia) - SK
-
-Not started: CROPEX (HR), HUPX (HU), GME (IT), BSP Southpool (SI) - all gated
-behind paid access, see `project-overview.md`.
-
-31 of 35 in-scope zones have ≥2 live sources. HR, HU and SI are still on a
-single source (their local scraper isn't built yet); IT also has just one
-(ENTSO-E, split into 7 bidding-zone rows - GME would be its second, not built).
-
-**Intraday** (BE only, test case ahead of other zones, all Prefect-deployed):
-
-- **EPEX IDA1** (`clients/epex/endpoints/ida1.py`) - Pan-European IDA1 auction,
-  backfilled from 2024-06-15
-- **EPEX IDA2** (`clients/epex/endpoints/ida2.py`) - Pan-European IDA2 auction
-- **EPEX IDA3** (`clients/epex/endpoints/ida3.py`) - Pan-European IDA3 auction,
-  backfilled from 2024-06-14
-- **EPEX VWAP** (`clients/epex/endpoints/vwap.py`) - ID1/ID3/IDFULL continuous
-  VWAP indices, backfilled to 2024-01-01
+reworked upstream; see `project-overview.md` > Streaming for details. This repo only ever
+calls `.get()`, unaffected either way.
 
 ## Data
 
-Target table: `prod.prices`, keyed on
-`valuetime, forecasttime, bidding_zone, market_type, market, source`. See
-`project-overview.md` for the full schema and column descriptions.
+Read-only from here. Target table: `prod.prices`, keyed on
+`valuetime, forecasttime, bidding_zone, market_type, market, source, resolution`. See
+`project-overview.md` for the full schema and column descriptions (DDL itself now lives in
+`scrapers`).
 
 ## Dependencies
 
 Poetry-managed (`pyproject.toml`/`poetry.lock`), own independent venv - not
-merged into Production's, see `project-overview.md`.
+merged into Production's or `scrapers`', and no path dependency on either repo,
+see `project-overview.md` > Architecture.
 
 ## Dashboard
 
-`monitoring/zone_map/` is a standalone map dashboard (coverage + price level per
+`dashboard/` is a standalone map dashboard (coverage + price level per
 bidding zone), run locally with:
 
 ```
-poetry run uvicorn monitoring.zone_map.app:app --reload
+poetry run uvicorn dashboard.app:app --reload --port 8000
 ```
+
+Pinned to port 8000 explicitly rather than left to uvicorn's unstated default.
+
+In production, it runs in Docker on the same internal server as `quent-data-stream`
+(`docker-compose.yml`, `Dockerfile`), published on port **8080**. The container has no live AWS
+access, so its DB credential (the READ_ONLY_USER role, `ai/db/quent`) is resolved once elsewhere
+and mounted in as a Docker secret rather than fetched live like local dev does - see
+`project-overview.md` > Docker deployment for the full setup (`scripts/
+materialize_runtime_secrets.py`) and redeploy steps.
 
 ## Status
 
 Historical backfill to 2024-01-01 is done and verified (day-by-day gap scan,
-not just MIN/MAX per zone) for every zone that can reach that far back;
-Nordpool, OTE, SEMO and ENEX are floor-limited by source-side retention
-windows instead. No Prefect deployment/schedule is wired up yet - see
-`project-overview.md` for full scope, architecture, current implementation
-status per zone, and the iteration/to-do list.
+not just MIN/MAX per zone) for every zone that can reach that far back - see
+`scrapers`' `project-overview.md` for per-source floors, current scraper
+implementation status, and its own data-completeness monitoring flow. Dashboard
+is live in Docker on port 8080 alongside `quent-data-stream`. See
+`project-overview.md` for this repo's full scope, architecture, and
+iteration/to-do list.

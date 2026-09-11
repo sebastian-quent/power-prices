@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PRICES</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='1' y='1' width='30' height='30' rx='8' fill='%2377bd46'/><path d='M17 6 8 18h6l-1 8 9-12h-6l1-8z' fill='white'/></svg>" />
+  <!-- applies a stored theme override before first paint, so the page never flashes the OS
+       default and then jumps to a different stored choice - see app.js's setTheme for the
+       click-side counterpart. -->
+  <script>
+    (function () {
+      var t = localStorage.getItem("theme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <img class="brand-mark" src="/static/quent_logo.png" alt="Quent" />
+      <h1 id="page-title">PRICES</h1>
+    </div>
+
+    <div class="legend">
+      <div class="view-toggle" id="view-toggle">
+        <button class="view-btn active" data-view="prices">Prices</button>
+        <button class="view-btn" data-view="coverage">Coverage</button>
+      </div>
+      <!-- EPEX's VWAP indices (ID1/ID3/IDFULL) scrape both 15min and 60min settlement rows -
+           this only ever matters for those three, so it starts hidden and is only shown when one
+           of them is the selected auction (see static/app.js selectMarket). Reuses the same
+           view-toggle/view-btn pill chrome as the toggles below it. -->
+      <div class="view-toggle" id="resolution-toggle" role="group" aria-label="VWAP resolution" hidden>
+        <button class="view-btn res-btn active" data-resolution="15" type="button">15min</button>
+        <button class="view-btn res-btn" data-resolution="60" type="button">60min</button>
+      </div>
+      <!-- which timezone the price-curve hover card's time labels are shown in - defaults to
+           CET/CEST (unchanged behavior), persisted to localStorage like the theme toggle. Reuses
+           .view-toggle/.view-btn styling (same pill-group look as Prices/Coverage above) rather
+           than a new component. -->
+      <div class="view-toggle" id="tz-toggle" role="group" aria-label="Display timezone">
+        <button class="view-btn tz-btn active" data-tz="cet" type="button">CET</button>
+        <button class="view-btn tz-btn" data-tz="utc" type="button">UTC</button>
+      </div>
+      <!-- same view-toggle/view-btn pill styling as the two selectors above, icon-only (sun/moon)
+           rather than text - whichever choice is currently in effect gets the active pill. -->
+      <div class="view-toggle" id="theme-toggle" role="group" aria-label="Color theme">
+        <button class="view-btn theme-btn" data-theme-choice="light" type="button" aria-label="Light mode" title="Light mode">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        </button>
+        <button class="view-btn theme-btn" data-theme-choice="dark" type="button" aria-label="Dark mode" title="Dark mode">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+      </div>
+      <!-- rightmost in the header, outermost of the four controls - wrapped in the same
+           view-toggle pill chrome as the three selectors before it (background/border/radius),
+           just holding a single icon-btn instead of a button pair. -->
+      <div class="view-toggle download-menu" id="download-menu">
+        <button id="download-btn" class="icon-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Download prices" title="Download prices">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19h14"/></svg>
+        </button>
+        <div class="download-panel" id="download-panel" hidden>
+          <div class="download-panel-title">Download CSV</div>
+          <div id="download-list" class="download-list"></div>
+          <button id="download-confirm" class="download-confirm" type="button" disabled>Download</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div id="map">
+    <div id="loader" class="loader"><div class="loader-spinner"></div></div>
+
+    <div class="auctions-panel">
+      <div class="day-picker">
+        <button id="prev-day" class="day-nav" aria-label="Previous day">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+        <input id="date-input" type="date" aria-label="Delivery day" />
+        <button id="next-day" class="day-nav" aria-label="Next day">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+      <div class="auctions-header">
+        <div class="auctions-title">Auctions</div>
+        <button id="auctions-toggle" class="auctions-toggle" type="button" aria-pressed="false" aria-label="Show only selected auction" title="Show only selected auction">
+          <span class="auctions-toggle-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </span>
+        </button>
+      </div>
+      <div id="auctions-list"></div>
+      <div class="coverage-legend" id="coverage-legend">
+        <span class="legend-item"><span class="auction-light complete"></span>Complete</span>
+        <span class="legend-item"><span class="auction-light partial"></span>Partial</span>
+        <span class="legend-item"><span class="auction-light late"></span>Missing</span>
+        <span class="legend-item"><span class="auction-light"></span>Pending</span>
+      </div>
+    </div>
+
+    <!-- floats bottom-right, out of the header - previously lived in the header's .legend
+         (see git history), moved here so the header only holds the three selector pills. -->
+    <div class="map-scale-panel">
+      <div class="price-scale" id="price-scale">
+        <span id="scale-min"></span>
+        <span class="scale-bar"></span>
+        <span id="scale-max"></span>
+      </div>
+      <div class="price-scale" id="coverage-scale" hidden>
+        <span class="coverage-label in-db">In DB</span>
+        <span class="scale-bar coverage-bar"><span class="coverage-bar-fill" id="coverage-bar-fill"></span></span>
+        <span class="coverage-label missing">Missing</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

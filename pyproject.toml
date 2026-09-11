@@ -5,7 +5,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry]
 name = "power-prices"
 version = "0.1.0"
-description = "European day-ahead (and later intraday) electricity price scrapers into a shared Postgres table."
+description = "Dashboard for European day-ahead (and later intraday) electricity prices, on top of the scrapers repo."
 readme = "README.md"
 package-mode = false
 
@@ -14,27 +14,19 @@ python = "==3.12.9"
 pandas = "~=2.2.0"
 sqlalchemy = "~=2.0.0"
 psycopg2 = "~=2.9.0"
-requests = "~=2.32.0"
-paramiko = "~=3.5.0"
-xmltodict = "~=0.14.0"
-zeep = "~=4.3.0"
-prefect = "3.4.14"
-importlib-metadata = ">=4.4"
 fastapi = "~=0.115.6"
 uvicorn = "~=0.34.0"
 pytz = "~=2025.2"
-lxml = "~=5.4.0"
-openpyxl = "~=3.1.0"
-python-dateutil = "~=2.9.0"
 
 [tool.poetry.dependencies.quent_core]
 git = "https://github.com/peter-quent/Core.git"
-rev = "v1.0.161"
+rev = "v1.0.165"
 
 [dependency-groups]
 dev = [
     "pytest (>=9.1.1,<10.0.0)",
-    "shapely (>=2.1.2,<3.0.0)"
+    "shapely (>=2.1.2,<3.0.0)",
+    "requests (>=2.32.0,<3.0.0)"
 ]
 
 [tool.pytest.ini_options]

@@ -153,6 +153,9 @@ output/
 # project-local Prefect home (isolated from the shared ~/.prefect, see project-overview.md Known gaps)
 .prefect/
 
+# materialized secrets (scripts/materialize_runtime_secrets.py) - never committed
+.runtime/
+
 # Environments
 .env
 .envrc
