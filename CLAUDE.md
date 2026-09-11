@@ -3,7 +3,7 @@
 See @project-overview.md for scope, architecture, and iteration plan.
 
 ## Docs
-- README.md is a condensed, external-facing summary of project-overview.md. Whenever project-overview.md changes (scope, sources, status), update README.md in the same edit if the change affects what it summarizes - don't let them drift.
+- README.md is scoped to the dashboard app only - what it is, the live URL, how to run it locally, how it's deployed. Not a summary of project-overview.md's data model/pipeline/scope content - that stays in project-overview.md only, linked from README's closing line. Whenever project-overview.md's dashboard-facing content changes (deploy details, run command, live status), update README.md in the same edit if it affects what README covers - don't let those drift.
 
 ## Layout
 This repo is dashboard-only - fetching, dumping, backfilling, data-completeness monitoring,
@@ -25,5 +25,4 @@ Read-only from here - `scrapers` owns writing to this table (dump, backfill, DDL
 - resolution: read per API response, never hardcode per zone
 - timestamps: UTC only, tz-aware (stored that way by whatever wrote the row)
 
-<!-- add source-specific quirks (auth, rate limits, response shapes) to clients/<source>/CLAUDE.md as each client gets built, not here -->
 <!-- add a rule here only after Claude gets something wrong twice, not speculatively -->

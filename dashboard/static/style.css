@@ -1,35 +1,24 @@
 :root {
-  /* native form-control theming (incl. the <input type="date"> popup calendar, which has no
-     other cross-browser CSS hook) - kept in the same three-state lockstep as every other token
-     below (OS-dark, explicit "dark" override, explicit "light" override). */
+  /* three-state lockstep with every other token below (OS-dark, explicit dark/light override) -
+     also covers the <input type="date"> popup, which has no other cross-browser CSS hook. */
   color-scheme: light;
   --brand: #77bd46;
   --brand-dark: #5c9636;
-  /* data-encoding colors (price scale, coverage status, chart line/fill, auction lights) -
-     deliberately a different hue family from --brand (muted teal-green rather than brand's
-     yellow-green) and dialed back from the original neon tones, but muted rather than washed-out
-     pastel - still meant to read clearly as a color, not a tint. -text variants are a touch
-     deeper/more saturated, for small dots/labels where the fill tone would be too soft. */
+  /* data-encoding colors, a different hue family from --brand - -text variants are more
+     saturated, for small dots/labels where the fill tone would be too soft. */
   --data-good: #5a9c82;
-  --data-good-text: #347357; /* darkened from #3a8066 - measured 4.31:1 vs --bg, below the 4.5:1 text floor */
+  --data-good-text: #347357;
   --data-warn: #cea35a;
-  --data-warn-text: #8a632c; /* darkened from #b3823a - measured 3.12:1 vs --bg, below the 4.5:1 text floor */
+  --data-warn-text: #8a632c;
   --data-bad: #c46a61;
   --data-bad-text: #a84f46;
-  /* auction card's traffic-light dots specifically - same hues as the -text tier above, a touch
-     more saturated since these are the one place in the redesign meant to read like a literal
-     traffic light at a glance, not a muted data tone. */
+  /* auction traffic-light dots - more saturated than the -text tier, meant to read literally. */
   --auction-good: #2e8f6c;
   --auction-warn: #c98a2e;
   --auction-bad: #b8483c;
-  /* two-tier no-data grey: pending (in-scope zone, this auction, just no rows yet) > context
-     (everything else - never in scope at all, e.g. Russia, or in scope but not this auction,
-     e.g. GB under SDAC). A dedicated third "not applicable" tier used to sit between these two,
-     but it couldn't clear the water gradient below it (the original single pending/context pair
-     measured as low as ~1.02 WCAG contrast against --map-bg-outer) or, once that was fixed,
-     couldn't clear the dataviz skill's OKLab floor against the pending grey either - see
-     app.js's notApplicableStyle for why it now just reuses context-fill, same as the imbalance
-     dashboard. */
+  /* two-tier no-data grey: pending (in scope, just no rows yet) vs. context (never in scope, or
+     out of scope for this auction) - see app.js's notApplicableStyle for why there's no third
+     middle tier (couldn't clear the dataviz skill's contrast floor once composited). */
   --nodata-fill: #c8c8c6;
   --nodead-stroke: #a6a6a3;
   --context-fill: #6c6c69;
@@ -43,25 +32,15 @@
   --card-border: #dcdcd9;
   --label-bg: rgba(255, 255, 255, 0.82);
   --control-bg: rgba(255, 255, 255, 0.7);
-  /* header pill-toggle track (Prices/Coverage, CET/UTC, theme, download) - a dedicated token
-     rather than reusing --nodata-fill (the map's "pending zone" fill): that token composites at
-     low opacity over the map background, so at full opacity as solid header chrome its dark-mode
-     value read as a bright grey box and dropped inactive --text-muted content to ~1.3:1 contrast
-     against it (invisible) - see the dark-mode block below for the matching value. Chosen to
-     clear ~4.5:1 against --text-muted while the wrapper's own 1px --card-border keeps the pill
-     boundary visible even where fill-vs-page-background separation is subtle. */
+  /* header pill-toggle track - a dedicated token rather than reusing --nodata-fill, which
+     composites at low opacity elsewhere and reads as too light for solid header chrome. */
   --control-track: #ececea;
-  /* deep, clearly-saturated blue rather than the original pale blue-grey (#c7d3e0/#94a7ba) - the
-     pale version composited (0.85 fill-opacity over --map-bg-outer) to within OKLab ΔE 2.5 of
-     --nodata-fill's own composite, i.e. indistinguishable from "no data yet" under normal vision
-     (dataviz skill's validate_palette.js normal-vision floor is 15). Re-stepped via the
-     validator against every real price-ramp anchor, not just the pending grey. */
+  /* deep, saturated blue - a paler version measured indistinguishable from --nodata-fill under
+     normal vision once composited (dataviz skill's contrast floor). */
   --noneur-fill: #3a5aa0;
   --noneur-stroke: #28407a;
   --grid-line: rgba(170, 130, 55, 0.3);
-  /* HIG-standard motion curves - --ease-default for hover/state transitions, --ease-out for
-     tap/press feedback, --ease-spring for the one "grow in place" interaction (hover card
-     expand) that benefits from a touch of overshoot. Not theme-dependent, so declared once. */
+  /* HIG-standard motion curves - --ease-spring is for the hover-card expand's slight overshoot. */
   --ease-default: cubic-bezier(0.25, 0.1, 0.25, 1);
   --ease-out: cubic-bezier(0, 0, 0.58, 1);
   --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
@@ -70,11 +49,9 @@
   --duration-normal: 300ms;
 }
 
-/* dark-mode tokens apply automatically from the OS setting (prefers-color-scheme), unless the
-   header toggle (see app.js) has stamped an explicit data-theme override on <html> - :not(...)
-   here lets an explicit "light" override win even on a dark-OS device; the matching
-   :root[data-theme="dark"] block below repeats the same tokens so an explicit "dark" override
-   wins on a light-OS device too. Keep both blocks in lockstep. */
+/* applies automatically from the OS setting unless the header toggle has stamped an explicit
+   data-theme override - the matching :root[data-theme="dark"] block below repeats these same
+   tokens for that override case. Keep both blocks in lockstep. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
@@ -88,15 +65,9 @@
     --auction-good: #5fd1a0;
     --auction-warn: #eaba5e;
     --auction-bad: #e2776a;
-    /* same two-tier ramp as light mode (pending lightest, context darkest). --nodata-fill is
-       lightened from the original #5c5c5c - composited at its real fillOpacity (0.4) over
-       --map-bg-outer, the original landed within OKLab ΔE ~1.1 of --context-fill (validate_palette.js
-       normal-vision floor is 15) - effectively one grey once actually rendered. --nodead-stroke is
-       left as-is: it doubles as the auctions panel's solid "pending" status dot (see .auction-light),
-       and lightening it there pushes it within ΔE 13.8 of --auction-bad, a worse regression than
-       the one being fixed here. context is kept close to the dark end ("pretty dark", per explicit
-       request) rather than lightened as much as pending. See app.js's notApplicableStyle for why
-       there's no third middle-grey tier here anymore. */
+    /* same two-tier ramp as light mode. --nodead-stroke is left alone despite the same contrast
+       math, since it doubles as the auctions panel's "pending" status dot and lightening it
+       would collide with --auction-bad instead. */
     --nodata-fill: #828282;
     --nodead-stroke: #6d6d6d;
     --context-fill: #2e2e2e;
@@ -1085,12 +1056,8 @@ a.leaflet-control-zoom-reset {
    fixed px height that would just get proportionally taller as the card widens. */
 .source-tooltip.expanded .curve-chart { height: auto; aspect-ratio: 2 / 1; margin-top: 12px; }
 
-/* the chart's only mark now that it has no area fill behind it - a touch heavier than the old
-   1.5px so the line still reads clearly on its own.
-   vector-effect keeps that width (and .chart-zero's dash pattern below) constant in actual
-   screen pixels - without it, stroke-width/stroke-dasharray are set in the SVG's own 216x56
-   viewBox units, which the expanded view stretches ~2.5x (card grows to 600px+ wide,
-   aspect-ratio 2/1 tall) along with the geometry, turning a crisp 2px line into a ~5px smear. */
+/* vector-effect keeps stroke-width constant in screen pixels - without it, the SVG's own
+   216x56 viewBox units get stretched ~2.5x in the expanded view, smearing a crisp line. */
 .chart-line {
   fill: none;
   stroke-width: 2;

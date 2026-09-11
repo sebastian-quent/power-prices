@@ -28,34 +28,12 @@ from dashboard.zones import (
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-# one entry per auction the UI can show, grouped into three panel sections - Day-ahead, IDA,
-# VWAP (see static/app.js AUCTION_GROUPS, which mirrors this ordering). GB has no single day-ahead
-# auction: Nord Pool (N2EX/GbHalfHour) and EPEX each run their own separate hourly/half-hourly GB
-# auctions with different gate closures/publish times, confirmed by direct research (not this
-# repo's own docs) - so each gets its own row rather than merging two differently-timed real
-# auctions under one label.
-#
-# no "zones" key here anymore - each auction's own covered zones (the completeness denominator
-# for the /api/auctions traffic light, and the map's "not applicable" cutoff) come from
-# get_market_zones() instead, which queries distinct (market_type, market, bidding_zone) straight
-# from prod.prices - not a hardcoded per-auction list (SDAC used to be "all 41 minus GB/IE" by
-# exclusion, N2EX/SEM-DA a bare ["GB"]/["IE"], and IDA1/IDA2/IDA3/VWAP borrowed a scraper's own
-# ZONE_FILE_CONFIG dict, see git history) - so an auction's actual coverage changing shows up
-# without a code change, same reasoning as the imbalance repo's get_scraped_zones().
-#
-# `clears` is the auction's results-publication time (CET/CEST wall-clock), researched per auction
-# directly from each operator's own published timings rather than this repo's own docs - exact
-# where an operator states a firm publish deadline (e.g. N2EX's "at latest 10:00 GMT/11:00 CET"),
-# `~`-prefixed where only an estimate exists (IDA1-3's publish moment isn't stated beyond gate
-# closure, so it's gate closure + the ~20min auction-processing window quoted for SIDC generally;
-# ID1/ID3/IDFULL use EPEX's own indices doc estimate of ~01:15 CET, which doesn't quite match this
-# repo's own measured ~00:45-00:55 landing times - the externally-sourced figure is shown here per
-# instruction not to rely on this repo's docs for this field). `clear_at` is the same time made
-# machine-checkable: (day_offset relative to target_date, wall-clock time in DELIVERY_DAY_TZ) at
-# which the auction has definitely cleared, used by get_auctions() to tell "hasn't cleared yet"
-# (no light) apart from "cleared and we still have nothing" (red) - see the "late" status below.
-# Kept in sync with `clears` (updated together, not left to drift as in the earlier gate-closure
-# version of this dict).
+# one entry per auction the UI can show (see static/app.js AUCTION_GROUPS for panel grouping).
+# GB has no single day-ahead auction - Nord Pool and EPEX each run their own, so each gets its
+# own row. Covered zones come from get_market_zones() (live query), not a key here, so an
+# auction's actual coverage can change with no code change. `clears` is the display string
+# (`~` = estimate, not a firm published deadline); `clear_at` is the same time as
+# (day_offset, wall-clock) for get_auctions()'s "late" vs "pending" check - keep both in sync.
 MARKET_OPTIONS = {
     "sdac": {
         "market_type": "DAY_AHEAD", "market": "SDAC", "default_offset_days": 1,
@@ -120,13 +98,8 @@ MARKET_OPTIONS = {
         "label": "IDFULL", "clears": "~01:15 CET/CEST (D+1)",
         "clear_at": (1, dt.time(1, 15)),
     },
-    # GB-only continuous VWAP indices (EPEX GB continuous intraday market, per half-hour
-    # settlement period) - RPD covers trades up to 4h in duration, RPD HH only half-hour-product
-    # trades (confirmed via EPEX's own index definitions, mirrored by Modo Energy's API docs:
-    # https://developers.modoenergy.com/reference/epex-intraday-reference-price-eod). EPEX states
-    # both are "released on their FTP at the end of the day" with no exact time/timezone
-    # published - reusing ID1/ID3/IDFULL's ~01:15 CET/CEST (D+1) estimate, since UK midnight (end
-    # of the GB delivery day) converts to ~01:00 CET/CEST, same EPEX-FTP-EOD pattern.
+    # GB-only continuous VWAP indices - RPD covers trades up to 4h, RPD HH only half-hour-product
+    # trades. No exact publish time is stated; reuses the ID1/ID3/IDFULL ~01:15 CET/CEST estimate.
     "rpd": {
         "market_type": "INTRADAY", "market": "RPD", "default_offset_days": -1,
         "label": "GB RPD", "clears": "~01:15 CET/CEST (D+1)",
@@ -147,27 +120,18 @@ VWAP_MARKETS = {"id1", "id3", "idfull"}
 
 
 def _zones_for(opts: dict) -> list[str]:
-    """this auction's own covered zones, sorted for a deterministic order - see get_market_zones()
-    for why this replaced a hardcoded per-auction zone list."""
+    """this auction's own covered zones, sorted for a deterministic order."""
     return sorted(get_market_zones().get((opts["market_type"], opts["market"]), set()))
 
 
-# SDAC clears ~12:55 CET/CEST (see MARKET_OPTIONS) - before this switch time tomorrow's auction
-# hasn't cleared yet, so today is the more useful default; only matters for the page's initial
-# load (main() in app.js fetches /api/prices with no date at all) since every later load passes
-# an explicit date through instead of relying on this default (see app.js's comment above its
-# selectView call).
+# before SDAC's ~12:55 clearing time, today is the more useful default than tomorrow.
 SDAC_DEFAULT_SWITCH_TIME = dt.time(12, 50)
 
 
 class CachedStaticFiles(StaticFiles):
-    """StaticFiles with a fixed Cache-Control header - how aggressively a given mount can be
-    cached depends entirely on how often its files actually change (see mounts below).
-
-    Also serves a precomputed `.gz` sibling directly when the client accepts gzip and one exists
-    (see build_geo.py's `_write_geojson`) - the geo files are large enough (multi-MB) that
-    GZipMiddleware recompressing them from scratch on every single request is real, avoidable
-    CPU cost when the content only changes on an occasional manual rebuild."""
+    """StaticFiles with a fixed Cache-Control header, and serves a precomputed `.gz` sibling
+    directly when the client accepts gzip (see build_geo.py's `_write_geojson`), avoiding
+    per-request recompression of these multi-MB files."""
 
     def __init__(self, *args, cache_control: str, **kwargs):
         super().__init__(*args, **kwargs)
@@ -192,14 +156,9 @@ class CachedStaticFiles(StaticFiles):
 app = FastAPI(title="PRICES")
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
-# most specific mounts first - Starlette matches in registration order, so /static/geo and
-# /static/vendor need to be checked before the catch-all /static mount below.
-# max-age=1 week (was 1 hour) - these are hand-committed build artifacts (see build_geo.py's
-# module docstring: "run manually... whenever upstream shapes are updated"), not something that
-# changes on a normal deploy, so an hour of freshness was needlessly forcing a multi-MB re-fetch
-# on every dashboard session past that window. Deliberately not `immutable` - the file can still
-# change in place on a rebuild without a URL/version bump, and this project has already been
-# burned once by a too-aggressive stale-cache assumption (see the /static mount's own comment).
+# most specific mounts first - Starlette matches in registration order.
+# geo files are hand-committed build artifacts (build_geo.py), so a week-long cache is safe;
+# not `immutable` since a rebuild can change them in place with no URL bump.
 app.mount(
     "/static/geo",
     CachedStaticFiles(directory=STATIC_DIR / "geo", cache_control="public, max-age=604800"),
@@ -210,18 +169,14 @@ app.mount(
     CachedStaticFiles(directory=STATIC_DIR / "vendor", cache_control="public, max-age=604800, immutable"),
     name="vendor",
 )
-# index.html/app.js/style.css change during active development - no-cache (not "no caching",
-# but "always revalidate") so a refresh reliably picks up the latest version instead of the
-# stale-until-hard-refresh behavior seen earlier in this project.
+# no-cache = always revalidate, not "don't cache" - these files change during development.
 app.mount("/static", CachedStaticFiles(directory=STATIC_DIR, cache_control="no-cache"), name="static")
 
 
 @app.get("/")
 def index() -> HTMLResponse:
-    """serves index.html with a `?v=<mtime>` cache-busting query param on app.js/style.css -
-    those files are already served no-cache (see the /static mount above), but relying on
-    revalidation alone has already gone stale on a live browser tab once (see that mount's own
-    comment) - a changed file now gets a new URL too, which no caching layer can serve stale."""
+    """serves index.html with a `?v=<mtime>` cache-busting query param on app.js/style.css, so
+    a changed file gets a new URL too rather than relying on revalidation alone."""
     html = (STATIC_DIR / "index.html").read_text()
     for asset in ("app.js", "style.css"):
         version = int((STATIC_DIR / asset).stat().st_mtime)
@@ -243,25 +198,11 @@ def _is_cleared(target_date: dt.date, opts: dict) -> bool:
 @app.get("/api/prices")
 def get_prices(date: str | None = None, market: str = "sdac", resolution: int | None = None) -> dict:
     """price summary per in-scope bidding zone for one market view (see MARKET_OPTIONS).
-    `date` is the delivery day (YYYY-MM-DD); defaults to that market's own natural default -
-    IDA2 always tomorrow (D-1 clearing pattern, see MARKET_OPTIONS), SDAC time-aware instead
-    (today before SDAC_DEFAULT_SWITCH_TIME CET/CEST, tomorrow after - see that constant).
-
-    `resolution` (15 or 60) only applies to VWAP_MARKETS, which scrape both resolutions under the
-    same market label (see zones.py's build_zone_summary) - defaults to 15min there, ignored
-    entirely for every other market so a stray value can't accidentally filter out data that was
-    never resolution-ambiguous in the first place.
-
-    `cleared` tells the map's coverage view whether this market's clearing time has already
-    passed for `date` - a missing zone only reads as a real gap (red) once true; before that
-    it's just not published yet (neutral), see static/app.js's coverageZoneStyle.
-
-    `market_zones` is this market's own covered-zones list from get_market_zones() (e.g. just GB
-    for N2EX, ~39 zones for SDAC) - `zones` itself still covers all 41 IN_SCOPE_ZONES so the map
-    doesn't need a second fetch when switching views, but the frontend needs to know which of
-    those 41 this market could ever cover, so a zone outside that list (e.g. GB/IE under SDAC)
-    reads as "not applicable" rather than "no data yet"/a real gap, see static/app.js's
-    currentMarketZones."""
+    `date` defaults to the market's own natural default day if omitted. `resolution` (15/60)
+    only applies to VWAP_MARKETS. `cleared` tells the map whether a missing zone is a real gap
+    (clearing time passed) vs. just not published yet. `market_zones` is this market's own
+    covered zones, distinct from the full 41-zone `zones` list, so the frontend can style a zone
+    outside it as "not applicable" rather than "no data yet"."""
     if market not in MARKET_OPTIONS:
         market = "sdac"
     opts = MARKET_OPTIONS[market]
@@ -285,19 +226,11 @@ def get_prices(date: str | None = None, market: str = "sdac", resolution: int | 
 
 @app.get("/api/auctions")
 def get_auctions(date: str | None = None) -> dict:
-    """status per auction (see MARKET_OPTIONS) for one shared delivery day - driven by whatever
-    date the main map is currently showing (see static/app.js's loadAuctions calls), not each
-    auction's own "today/tomorrow" default, so browsing back to an already-backfilled day reads
-    e.g. 39/39 there instead of always reporting on the live day. Defaults to today if no date
-    is given (e.g. a bare API call with no query param).
+    """status per auction (see MARKET_OPTIONS) for one shared delivery day - the date the map is
+    currently showing, not each auction's own default. Defaults to today if no date is given.
 
-    status is "complete" once every zone that auction actually covers has data, "partial" once
-    some (but not all) of them do. With none yet, it's "late" if the auction's own clearing time
-    (see MARKET_OPTIONS' clear_at) has already passed for this target_date - a real gap worth
-    flagging red - or "pending" if it simply hasn't cleared yet, which is expected and shown
-    neutral rather than as a problem. Never raised as an error even when late, same "log, don't
-    fail" spirit as monitoring/completeness.py.
-    """
+    status is "complete" once every zone the auction covers has data, "partial" if some do,
+    "late" if none do and the clearing time has passed, else "pending"."""
     target_date = dt.date.fromisoformat(date) if date else dt.date.today()
     zones_with_data = build_auctions_summary(target_date)
     auctions = []
@@ -323,13 +256,8 @@ def get_auctions(date: str | None = None) -> dict:
 @app.get("/api/download")
 def download_prices(date: str, markets: str) -> Response:
     """CSV export of raw per-period price rows for one delivery day across one or more selected
-    auctions (see MARKET_OPTIONS) - triggered by the header's download button (static/app.js
-    downloadSelectedPrices). Deliberately auction-only, no bidding-zone filter - selecting zones
-    too was considered and dropped as too fiddly for the gain.
-
-    `markets` is a comma-separated list of MARKET_OPTIONS keys. Rows are exactly what landed
-    (bidding_zone, source, valuetime), not the map's own per-zone baseload average/curve.
-    """
+    auctions. `markets` is a comma-separated list of MARKET_OPTIONS keys, auction-only (no
+    bidding-zone filter)."""
     target_date = dt.date.fromisoformat(date)
     keys = [key for key in markets.split(",") if key in MARKET_OPTIONS]
     if not keys:

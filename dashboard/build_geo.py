@@ -1,20 +1,13 @@
 """one-off script: builds geo/{zones,context,grid}.geojson from public sources.
 
-not run by the FastAPI app - run manually (`poetry run python -m dashboard.build_geo`)
-whenever the zone list changes or upstream shapes are updated, then commit the output files.
+Not run by the FastAPI app - run manually (`poetry run python -m dashboard.build_geo`) whenever
+the zone list changes or upstream shapes are updated, then commit the output files.
 
 sources:
-- bidding-zone polygons: EnergieID/entsoe-py `entsoe/geo/geojson/` (MIT license), covers every
-  IN_SCOPE_ZONES entry except GB/IE (matches project-overview.md - GB has no ENTSO-E area at all).
-  Clipped against the Natural Earth land outline below (see _clip_to_land) - entsoe-py's
-  multi-zone-country shapes (Norway, Sweden, Italy) are custom-drawn envelopes that don't trace
-  every fjord/island, so left unclipped they visibly bulge out to sea.
-- GB/IE + the "everything else, greyed out" context layer (the whole rest of the world, not just
-  Europe - see build_context_geojson): Natural Earth 1:50m admin-0 countries (public domain),
-  via the nvkelso/natural-earth-vector GitHub mirror. Also doubles as the clip layer above.
-- grid.geojson: Europe's high-voltage transmission lines, a purely decorative background layer
-  (see build_grid_geojson) from GridKit (github.com/PyPSA/GridKit), an OpenStreetMap `power=line`
-  extraction published under ODbL 1.0 on Zenodo.
+- bidding-zone polygons: EnergieID/entsoe-py `entsoe/geo/geojson/` (MIT), all zones except GB/IE
+  (no ENTSO-E area), clipped to the real coastline (see _clip_to_land).
+- GB/IE + the world context layer: Natural Earth 1:50m admin-0 countries (public domain).
+- grid.geojson: GridKit (OpenStreetMap `power=line` extraction, ODbL 1.0).
 """
 
 import csv
@@ -35,11 +28,8 @@ logger = logging.getLogger(__name__)
 
 GEO_DIR = Path(__file__).resolve().parent / "static" / "geo"
 
-# simplification/rounding - none of this data needs survey-grade precision at the zoom range this
-# map actually uses (locked to a Europe-wide view, see static/app.js's setMinZoom/setMaxZoom).
-# tolerances are in degrees (~1 degree latitude = ~111km). zones keeps more detail than context
-# since it's the interactive/hovered layer; context is pure background. grid.geojson's links are
-# already minimal 2-point segments (nothing to simplify), so only coordinate rounding applies there.
+# simplification tolerances in degrees (~1deg latitude = ~111km) - zones keeps more detail than
+# context since it's the interactive/hovered layer; context is pure background.
 ZONE_SIMPLIFY_TOLERANCE = 0.003
 CONTEXT_SIMPLIFY_TOLERANCE = 0.01
 COORD_DECIMALS = 5  # ~1m precision, plenty for on-screen rendering
@@ -95,9 +85,7 @@ COVERED_ISO_A2 = {
 }
 
 def _round_coords(coords, ndigits: int = COORD_DECIMALS):
-    """recursively rounds a GeoJSON `coordinates` array (arbitrary nesting depth depending on
-    geometry type) to ndigits - shrinks file size independent of simplify() below, since full
-    float precision (~15-17 significant digits) is pure waste at this map's display scale."""
+    """recursively rounds a GeoJSON `coordinates` array to ndigits, to shrink file size."""
     if isinstance(coords[0], (int, float)):
         return [round(c, ndigits) for c in coords]
     return [_round_coords(c, ndigits) for c in coords]
@@ -111,16 +99,9 @@ def _simplify_and_round(geom, tolerance: float) -> dict:
 
 
 def _label_point(geom) -> tuple[float, float]:
-    """anchor for the permanent zone-code label (static/app.js zoneLabelHtml/updateZoneLabel) -
-    not a plain centroid. unary_union() can leave a zone as a MultiPolygon (mainland + a small
-    island/exclave part, e.g. FR's Corsica or FI's Aland), and Leaflet's own tooltip
-    auto-positioning for permanent tooltips (Polygon.getCenter(), which only looks at the
-    *first* sub-polygon of a MultiPolygon) then anchors the label on whichever part happens to
-    be listed first in the source data rather than the zone's main body. Picking the largest-area
-    part's representative_point() (guaranteed inside that part, unlike a centroid which can fall
-    outside for concave/crescent shapes) keeps the label on the zone's mainland regardless of
-    part order.
-    """
+    """anchor for the permanent zone-code label - the largest part's representative_point(), not
+    a plain centroid, so a MultiPolygon zone (mainland + island, e.g. FR/Corsica) labels its
+    mainland regardless of part order."""
     parts = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
     largest = max(parts, key=lambda p: p.area)
     point = largest.representative_point()
@@ -128,15 +109,9 @@ def _label_point(geom) -> tuple[float, float]:
 
 
 def _clip_to_land(zone_geom, iso_codes: list[str], land_by_iso: dict):
-    """intersects an entsoe-py zone polygon with the real coastline (Natural Earth land, at the
-    same 50m resolution already used for the context layer) - entsoe-py's multi-zone-country
-    shapes (Norway, Sweden, Italy) are custom-drawn envelopes that smooth across every fjord and
-    island rather than tracing the coast, so left unclipped they visibly bulge out to sea (worst
-    for NO4, ~34% of the unclipped NO1-5 union area measured outside Norway's real 10m coastline).
-    Clipping an already-coastline-accurate zone (most single-zone countries, sourced from Natural
-    Earth to begin with) against its own country is a no-op, so this applies uniformly rather than
-    special-casing NO/SE/IT.
-    """
+    """intersects an entsoe-py zone polygon with the real coastline (Natural Earth land) - the
+    multi-zone-country shapes (Norway, Sweden, Italy) smooth across fjords/islands rather than
+    tracing the coast. Applied uniformly; a no-op for zones already coastline-accurate."""
     land = unary_union([land_by_iso[iso] for iso in iso_codes if iso in land_by_iso])
     clipped = zone_geom.intersection(land)
     if clipped.is_empty:
@@ -150,10 +125,8 @@ def build_zones_geojson() -> dict:
     ne_resp.raise_for_status()
     ne_countries = ne_resp.json()
 
-    # ISO_A2 is the sentinel "-99" for a handful of countries with complex sovereignty status
-    # (Norway and France among them, see build_context_geojson) - ISO_A2_EH ("extended"/de-facto)
-    # carries the real code for those, and is used as the primary key here since Norway is one of
-    # our clip targets.
+    # ISO_A2 is "-99" for Norway/France (Natural Earth's sentinel for complex sovereignty) -
+    # ISO_A2_EH carries the real code, needed here since Norway is a clip target.
     land_by_iso: dict = {}
     for feature in ne_countries["features"]:
         iso_a2 = feature["properties"].get("ISO_A2_EH") or feature["properties"].get("ISO_A2")
@@ -204,18 +177,12 @@ def build_zones_geojson() -> dict:
 
 
 def build_context_geojson(ne_countries: dict) -> dict:
-    """every country worldwide except the ones we draw as colored zones - not clipped to a
-    Europe bounding box. the map's own maxBounds (see static/app.js) keeps the user from ever
-    panning/zooming far enough to reach the far side of antimeridian-crossing countries (Russia's
-    Far East, USA/Alaska) where an unclipped polygon would otherwise render as a stray line
-    across the whole map - so there's no need to clip the data itself, just restrict the camera.
-    """
+    """every country worldwide except the ones drawn as colored zones - not clipped to a Europe
+    bounding box; the map's own maxBounds restricts the camera instead."""
     features = []
     for feature in ne_countries["features"]:
-        # plain ISO_A2 is "-99" for France and Norway in this dataset (Natural Earth's sentinel
-        # for disputed/complex sovereignty cases) - falls through the exclusion check below,
-        # leaving their full country outline double-drawn under the zones layer's own FR/NO1-5
-        # shapes. ISO_A2_EH ("extended"/de-facto) carries the real code for exactly this case.
+        # ISO_A2_EH over ISO_A2 - see build_zone_geojson, same France/Norway "-99" issue, which
+        # here would otherwise double-draw their outline under the zones layer's own shapes.
         iso_a2 = feature["properties"].get("ISO_A2_EH") or feature["properties"].get("ISO_A2")
         if iso_a2 in COVERED_ISO_A2:
             continue
@@ -242,10 +209,8 @@ def _parse_wkt_linestring(wkt: str) -> list[list[float]] | None:
 
 
 def build_grid_geojson() -> dict:
-    """Europe's high-voltage transmission lines - a faint decorative background layer, not
-    analytical data (see module docstring: 2016 extract, ODbL 1.0). every link already ships
-    its own ready-to-use WKT LINESTRING, so this just needs parsing, no vertex-table join.
-    """
+    """Europe's high-voltage transmission lines - a decorative background layer, not analytical
+    data (see module docstring: ODbL 1.0)."""
     logger.info("fetching GridKit Europe high-voltage grid dataset")
     resp = requests.get(GRIDKIT_EUROPE_ZIP_URL, timeout=60)
     resp.raise_for_status()
@@ -263,9 +228,8 @@ def build_grid_geojson() -> dict:
 
 
 def _write_geojson(path: Path, data: dict) -> None:
-    """writes the plain file plus a precomputed `.gz` sibling - served directly by app.py's
-    CachedStaticFiles when the client accepts gzip, so compressing these multi-MB files happens
-    once here at build time rather than on every request via GZipMiddleware."""
+    """writes the plain file plus a precomputed `.gz` sibling, served directly by app.py's
+    CachedStaticFiles instead of compressing on every request."""
     raw = json.dumps(data).encode("utf-8")
     path.write_bytes(raw)
     Path(f"{path}.gz").write_bytes(gzip.compress(raw, compresslevel=9))

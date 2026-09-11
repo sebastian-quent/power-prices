@@ -1,12 +1,5 @@
 """per-zone price summary for a delivery day, for the map dashboard's /api/prices - covers
 DAY_AHEAD (default) as well as intraday auctions like IDA2 (pass market_type/market).
-
-groups by (source, bidding_zone, market) before summing to actual/expected per zone, extended with:
-- a headline "baseload" price per zone (mean price across the day's settlement periods - same
-  thing EPEX's own market-results map calls "Baseload"), averaged across sources rather than a
-  straight row-mean, for the GB mixed-resolution reason below.
-- a per-period price curve from whichever source landed the most periods that day ("primary"),
-  for the hover detail table.
 """
 
 import datetime as dt
@@ -23,9 +16,6 @@ engine = get_engine()
 MARKET_TYPE = "DAY_AHEAD"
 DELIVERY_DAY_TZ = pytz.timezone("Europe/Copenhagen")
 
-# same 41-zone list as monitoring/completeness.py, duplicated rather than shared via
-# core/ - consistent with that module's own note to only promote it once a real need for
-# sharing shows up.
 IN_SCOPE_ZONES = [
     "AT", "BE", "BG", "CH", "CZ", "DE", "DK1", "DK2", "EE", "ES", "FI", "FR", "GB", "GR",
     "HR", "HU", "IE", "IT_NORD", "IT_CNOR", "IT_CSUD", "IT_SUD", "IT_SICI", "IT_SARD",
@@ -41,15 +31,8 @@ _MARKET_ZONES_TTL_SECONDS = 86400  # 24h - a new zone/auction is rare/deliberate
 
 def get_market_zones() -> dict[tuple[str, str], set[str]]:
     """bidding zones that have ever landed a row for each (market_type, market) pair in
-    prod.prices, across all history - not a hardcoded per-auction zone list (dashboard/app.py's
-    MARKET_OPTIONS used to hardcode e.g. "zones": ["GB"] for N2EX, or borrow a scraper's own
-    ZONE_FILE_CONFIG for the IDA/VWAP auctions) - so an auction's actual coverage changing (a new
-    zone added, or one dropped) shows up here without a code change. Mirrors imbalance's
-    get_scraped_zones() (dashboard/zones.py in the sibling imbalance repo) - same 24h cache, same
-    reasoning: this only changes on a deliberate scraper change, not routine day-to-day scraping -
-    a dashboard process left running for a while shouldn't re-query this on every date/market
-    switch just to get the same answer back.
-    """
+    prod.prices, across all history. Cached 24h - this only changes on a deliberate scraper
+    change, not routine day-to-day scraping."""
     now = time.monotonic()
     if _MARKET_ZONES_CACHE["zones"] is None or now - _MARKET_ZONES_CACHE["fetched_at"] > _MARKET_ZONES_TTL_SECONDS:
         with price_store.engine.connect() as conn:
@@ -68,17 +51,9 @@ def _day_bounds_utc(date: dt.date) -> tuple[dt.datetime, dt.datetime]:
     return start, end
 
 
-# (market, bidding_zone) pairs whose auction only covers the second half of the local delivery
-# day (12:00-24:00), not the full day - so "expected" for these can't be span_minutes/resolution
-# over the whole day. Confirmed empirically against prod.prices (every zone's actual max row
-# count topped out at exactly half the full-day count, always starting at local 12:00, never
-# more): IDA3's own gate closure is ~10:00 CET/CEST on delivery day D itself, covering only
-# periods from Hour 13 onward - unlike IDA1/IDA2, which gate-close the evening of D-1 and cover
-# the whole day (scrapers' clients/epex/endpoints/ida3.py). GB and CH each also run their own
-# local (non-pan-European) IDA2 auction that likewise gate-closes mid-morning on D rather than
-# the evening of D-1 - the pan-European IDA2 label is shared but the product isn't (scrapers'
-# clients/epex/endpoints/ida.py module docstring). A day's DST transition always falls before
-# noon, so this half never absorbs the 23/25-hour anomaly - it's a flat 12h/resolution every day.
+# (market, bidding_zone) pairs whose auction only ever covers the second half of the local
+# delivery day (12:00-24:00) - IDA3 everywhere, plus GB/CH's own local IDA2 products. "expected"
+# for these must use a local-noon start, not span_minutes/resolution over the whole day.
 _HALF_DAY_MARKETS = {"IDA3"}
 _HALF_DAY_MARKET_ZONES = {("IDA2", "GB"), ("IDA2", "CH")}
 
@@ -94,20 +69,16 @@ def _expected_periods(
 
 def _get_day_rows(target_date: dt.date) -> pd.DataFrame:
     """raw prod.prices rows for one delivery day, across every market_type/market - the shared
-    fetch behind build_zone_summary() (one market's view), build_auctions_summary() (all markets'
-    status) and build_price_rows() (CSV export). Deliberately always a live query, no caching -
-    this repo's dedup/rescrape strategy allows a rescrape to insert a new row at any time for an
-    already-published day (see Dedup/rescrape strategy in project-overview.md), and for a trading
-    tool a changed price silently not showing up because of a cache window is worse than the
-    (now small, since this replaced a 14-query fan-out) cost of a live query per request."""
+    fetch behind build_zone_summary(), build_auctions_summary() and build_price_rows(). Always a
+    live query, deliberately uncached: a rescrape can change an already-published day's price at
+    any time, and a stale value not showing up is worse than the cost of a live query."""
     start, end = _day_bounds_utc(target_date)
     return price_store.get(from_valuetime=pd.Timestamp(start), to_valuetime=pd.Timestamp(end))
 
 
 def build_auctions_summary(target_date: dt.date) -> dict[tuple[str, str], set[str]]:
     """bidding zones with at least one landed row per (market_type, market), for one delivery
-    day - powers app.py's /api/auctions status panel, which only needs has-data booleans, not
-    build_zone_summary's full avg_price/curve rollup."""
+    day - powers /api/auctions, which only needs has-data booleans."""
     df = _get_day_rows(target_date)
     grouped: dict[tuple[str, str], set[str]] = {}
     if df.empty:
@@ -118,9 +89,8 @@ def build_auctions_summary(target_date: dt.date) -> dict[tuple[str, str], set[st
 
 
 def build_price_rows(target_date: dt.date, market_type: str, market: str) -> pd.DataFrame:
-    """raw per-period price rows for one market/day, for CSV export (see app.py's /api/download)
-    - every (bidding_zone, source) row as landed, not build_zone_summary's per-zone baseload/
-    curve rollup."""
+    """raw per-period price rows for one market/day, for CSV export (/api/download) - every
+    (bidding_zone, source) row as landed."""
     df = _get_day_rows(target_date)
     return df[(df["market_type"] == market_type) & (df["market"] == market)].reset_index(drop=True)
 
@@ -131,21 +101,14 @@ def build_zone_summary(
 ) -> dict[str, dict]:
     """one entry per IN_SCOPE_ZONES, keyed by bidding_zone.
 
-    `market_type`/`market` select the view (e.g. DAY_AHEAD/None for the day-ahead baseload
-    across all its auctions, or INTRADAY/"IDA2" for just that auction), filtered in pandas out of
-    _get_day_rows()'s already-fetched whole day rather than a query of their own.
-
-    `resolution_minutes`, if given, filters to just that settlement resolution before grouping -
-    needed for EPEX's VWAP indices (ID1/ID3/IDFULL), which scrape both 15min and 60min rows under
-    the *same* (source, market) - resolution isn't part of the groupby key below, so without this
-    filter the two would silently blend into one averaged price/curve instead of staying distinct
-    (see app.py's VWAP_MARKETS/resolution toggle).
+    `market_type`/`market` select the view (e.g. DAY_AHEAD/None for day-ahead baseload across
+    all its auctions, or INTRADAY/"IDA2" for just that auction). `resolution_minutes`, if given,
+    filters to just that settlement resolution - needed for the VWAP indices, which scrape both
+    15min and 60min rows under the same (source, market).
 
     headline `avg_price` ("baseload") is the mean of each (source, market)'s own average price,
-    not a straight row-mean - GB lands two markets at different resolutions (N2EX hourly,
-    GbHalfHour half-hourly, see project-overview.md), and a plain row-mean would let the
-    half-hourly market's 2x row count silently outweigh the hourly one. `curve` is the raw
-    per-period prices from the single (source, market) that landed the most periods that day.
+    not a straight row-mean, so GB's half-hourly market can't silently outweigh its hourly one.
+    `curve` is the raw per-period prices from whichever (source, market) landed the most periods.
     """
     start, end = _day_bounds_utc(target_date)
     df = _get_day_rows(target_date)
@@ -188,9 +151,7 @@ def build_zone_summary(
         ]                                                                   
 
         # "primary" source for the hover curve: whichever (source, market) landed the most
-        # settlement periods for this zone/day - no per-zone primary/backup assignment exists
-        # yet (see project-overview.md Scheduling), so this is a per-request, per-day pick
-        # rather than a fixed table. ties broken alphabetically for determinism.
+        # periods this zone/day, ties broken alphabetically.
         primary = rows.sort_values(["actual", "source", "market"], ascending=[False, True, True]).iloc[0]
         curve_df = df[
             (df["bidding_zone"] == zone) & (df["source"] == primary["source"]) & (df["market"] == primary["market"])

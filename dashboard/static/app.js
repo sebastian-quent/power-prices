@@ -5,14 +5,10 @@ function hexToRgb(hex) {
   return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [0, 0, 0];
 }
 
-// price -> color, green (cheap) through amber to red (expensive) - normalized per-day against
-// the *current* day's own min/max, not a fixed absolute scale, since day-ahead price levels
-// swing a lot day to day and a fixed scale would go flat/uninformative on calm days.
-// read from CSS (style.css --data-good/-warn/-bad) rather than duplicated as hardcoded RGB -
-// those tones and the header's .scale-bar gradient drifted apart once already from being kept
-// as separate copies, so this is the one place they're defined, both other spots read from here.
-// `let`, not `const` - the light/dark values differ (see style.css), so the theme toggle has to
-// re-read these after flipping data-theme, or the map would keep painting the old mode's colors.
+// price -> color, green (cheap) through amber to red (expensive), normalized per-day against
+// that day's own min/max. Read from CSS (--data-good/-warn/-bad), not duplicated as hardcoded
+// RGB, so the map and the header scale never drift apart. `let` since light/dark values differ
+// and the theme toggle re-reads these after flipping data-theme.
 let PRICE_LOW = hexToRgb(getComputedStyle(document.documentElement).getPropertyValue("--data-good"));
 let PRICE_MID = hexToRgb(getComputedStyle(document.documentElement).getPropertyValue("--data-warn"));
 let PRICE_HIGH = hexToRgb(getComputedStyle(document.documentElement).getPropertyValue("--data-bad"));
@@ -32,18 +28,14 @@ function effectiveTheme() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-// reflects the current effective theme onto #theme-toggle's Light/Dark pill - called on load and
-// whenever the OS setting changes with no explicit override in place, so the pill never drifts
-// out of sync with what's actually on screen (mirrors effectiveTheme()'s own cascade).
+// reflects the current effective theme onto #theme-toggle's Light/Dark pill.
 function syncThemeToggleUI() {
   const current = effectiveTheme();
   document.querySelectorAll(".theme-btn").forEach((btn) => btn.classList.toggle("active", btn.dataset.themeChoice === current));
 }
 
-// click handler for #theme-toggle's Light/Dark buttons - sets an explicit override (unlike the
-// old single-button flip, this always writes one, even if it happens to match the OS setting)
-// and persists it for applyStoredTheme (index.html's inline head script) to pick up on the next
-// load.
+// sets an explicit theme override, persisted for index.html's inline head script to pick up
+// on the next load.
 function setTheme(choice) {
   if (choice === effectiveTheme()) return;
   document.documentElement.setAttribute("data-theme", choice);
@@ -51,21 +43,17 @@ function setTheme(choice) {
   refreshPriceRampColors();
   repaintZones();
   syncThemeToggleUI();
-  // an open hover card's curve chart draws its stroke color once, at open time (see
-  // curveChartHtml) - closing it here is simpler than re-drawing it in place, and it reopens
-  // instantly with the new theme's colors on the next hover.
+  // an open hover card's curve chart draws its stroke color once at open time - simpler to
+  // close it than re-draw in place; it reopens with the new theme's colors on next hover.
   if (hoverTooltip) {
     map.removeLayer(hoverTooltip);
     hoverTooltip = null;
   }
 }
 
-// only zones actually priced in EUR feed the price-intensity scale. in practice that's every
-// SDAC/SEM_DA zone (including CH and the Nordics, whose day-ahead auction clears in EUR even
-// though their retail currency isn't) - only GB (its own N2EX/GbHalfHour auctions, not SDAC)
-// lands in GBP. there's no FX conversion anywhere in this repo (see project-overview.md), so
-// mixing a non-EUR price into the same 0-1 scale as EUR zones would silently compare unrelated
-// units instead of just excluding the rare zone that isn't on this scale.
+// only zones actually priced in EUR feed the price-intensity scale - only GB (N2EX/GbHalfHour)
+// lands in GBP among in-scope zones. No FX conversion anywhere in this repo, so a non-EUR price
+// must be excluded from the scale rather than silently compared against EUR values.
 const SCALE_CURRENCY = "EUR";
 
 // display names for the hover card only - map/API both key everything by the plain
@@ -106,9 +94,8 @@ const AUCTION_GROUPS = {
   rpd: "VWAP", rpd_hh: "VWAP",
 };
 
-// mirrors app.py's MARKET_OPTIONS keys - only used as the startup default (tomorrow for SDAC
-// and IDA2 alike, yesterday for the VWAP indices, see MARKET_OPTIONS); once loaded,
-// selectMarket() carries the currently selected date through instead of resetting to it.
+// mirrors app.py's MARKET_OPTIONS keys - only the startup default; selectMarket() carries the
+// currently selected date through instead of resetting to each market's own default.
 let currentMarket = "sdac";
 
 // "prices" (default) is the existing green->red price-intensity map; "coverage" is a quick
@@ -116,27 +103,20 @@ let currentMarket = "sdac";
 // zoneStyle()/label reading of whatever /api/prices already returned (see selectView below).
 let currentView = "prices";
 
-// whether the currently-selected market has cleared for the currently-selected date (see
-// app.py's get_prices `cleared` field) - a coverage-view zone with no data reads "missing"
-// (red) once true, or just "not published yet" (neutral) while still false. Updated alongside
-// priceByZone on every load/date/market change; not itself part of the per-zone info object.
+// whether the selected market has cleared for the selected date (app.py's `cleared` field) - a
+// coverage-view zone with no data reads "missing" (red) once true, "not published yet" before.
 let marketCleared = true;
 
-// zones the *currently selected market* can ever cover (app.py's get_prices `market_zones`,
-// e.g. just GB for N2EX, 39 zones for SDAC) - distinct from the full 41-zone IN_SCOPE_ZONES that
-// `priceByZone` always covers. A zone outside this set (e.g. GB/IE under SDAC) will never have
-// data for this market, so it's styled/labelled as "not applicable" rather than "no data yet"
-// (which would wrongly imply it's merely pending, or read as a real gap once cleared).
+// zones the *currently selected market* can ever cover (app.py's `market_zones`) - distinct
+// from the full 41-zone IN_SCOPE_ZONES `priceByZone` always covers. A zone outside this set is
+// styled "not applicable" rather than "no data yet".
 let currentMarketZones = new Set();
 
-// which timezone the price-curve hover card's time labels are shown in ("cet" = Europe/Copenhagen,
-// matching dashboard/zones.py DELIVERY_DAY_TZ; "utc" reads the curve's own `time_utc` field
-// instead) - persisted like the theme toggle, defaults to CET/CEST (unchanged prior behavior).
-// Purely a label-formatting choice: nowLineX/timeToMinutes below always position the "now" line
-// using the Copenhagen `time` field regardless of this setting, since that positioning is about
-// time-of-day-within-the-delivery-day, not the display timezone, and UTC labels for a Copenhagen
-// calendar day wrap around UTC midnight (non-monotonic minutes-of-day), which would break that
-// interpolation.
+// which timezone the price-curve hover card's labels use ("cet" = Europe/Copenhagen, matching
+// zones.py's DELIVERY_DAY_TZ; "utc" reads the curve's own `time_utc`) - label-formatting only:
+// nowLineX/timeToMinutes always position the "now" line using the Copenhagen `time` field,
+// since UTC labels for a Copenhagen calendar day wrap around UTC midnight (non-monotonic),
+// which would break that interpolation.
 let displayTz = localStorage.getItem("displayTz") === "utc" ? "utc" : "cet";
 
 function curveLabel(point) {
@@ -147,10 +127,8 @@ function curveLabel(point) {
 // resolution toggle only ever applies to these, hidden the rest of the time (see selectMarket).
 const RESOLUTION_TOGGLE_MARKETS = new Set(["id1", "id3", "idfull"]);
 
-// which settlement resolution the VWAP markets' price/curve data is fetched at - persisted like
-// the tz/theme toggles, defaults to 15min (unchanged prior behavior, back when 60min wasn't
-// scraped yet). Unlike setDisplayTz, this changes which data is fetched, not just how it's
-// labelled, so it triggers a reload rather than just a repaint.
+// which settlement resolution VWAP markets fetch at, defaults to 15min. Unlike setDisplayTz,
+// this changes which data is fetched, so it triggers a reload rather than just a repaint.
 let displayResolution = localStorage.getItem("vwapResolution") === "60" ? 60 : 15;
 
 function setResolution(res) {
@@ -166,17 +144,16 @@ function setDisplayTz(tz) {
   displayTz = tz;
   localStorage.setItem("displayTz", tz);
   document.querySelectorAll(".tz-btn").forEach((btn) => btn.classList.toggle("active", btn.dataset.tz === tz));
-  // simplest correct fix, same as setTheme's own approach: close rather than re-render in
-  // place, since expanded/info are held in the mouseover handler's closure, not accessible here.
+  // close rather than re-render in place - expanded/info are held in the mouseover handler's
+  // own closure, not accessible here.
   if (hoverTooltip) {
     map.removeLayer(hoverTooltip);
     hoverTooltip = null;
   }
 }
 
-// whether the auctions panel is collapsed to just the currently selected auction - default is
-// expanded (every auction shown, grouped), same as before this toggle existed. Cached alongside
-// the last /api/auctions response so toggling re-renders instantly without a re-fetch.
+// whether the auctions panel is collapsed to just the selected auction. Cached alongside the
+// last /api/auctions response so toggling re-renders instantly without a re-fetch.
 let auctionsCollapsed = false;
 let lastAuctionsData = null;
 
@@ -190,26 +167,19 @@ async function selectMarket(market) {
   if (market === currentMarket) return;
   currentMarket = market;
   setActiveAuctionRow();
-  // only visible for the VWAP markets (see RESOLUTION_TOGGLE_MARKETS) - anything else has no
-  // resolution ambiguity to toggle.
+  // only visible for the VWAP markets (see RESOLUTION_TOGGLE_MARKETS).
   document.getElementById("resolution-toggle").hidden = !RESOLUTION_TOGGLE_MARKETS.has(market);
-  // the date picker is the source of truth once the page has loaded (day-ahead/tomorrow is
-  // only the startup default) - switching auctions must not jump the date back to that
-  // auction's own default, so the currently selected date is passed through explicitly.
+  // the date picker is the source of truth once loaded - switching auctions must not jump the
+  // date back to that auction's own default.
   await loadPrices(document.getElementById("date-input").value);
-  // currentMarketZones is only known once loadPrices' /api/prices response lands (see
-  // applyPrices), so the camera fit has to wait for that - a market covering just a
-  // handful of zones (e.g. IDA1, BE-only today) zooms in on them instead of staying at
-  // whatever zoom level the previous market left the map at. Dynamic by construction: it
-  // reads the market's live `zones` list (see app.py MARKET_OPTIONS), so it keeps tracking
-  // correctly as more zones get activated for a given market.
+  // currentMarketZones is only known once loadPrices' response lands, so the camera fit waits
+  // for that - a narrow market (e.g. IDA1) zooms in on its zones instead of the previous market's
+  // zoom level.
   focusMarketZones();
 }
 
-// fits the camera to just the zones the current market actually covers - a no-op-ish framing
-// for wide markets like SDAC (close to the full map already), a real zoom-in for narrow ones.
-// Does not touch minZoom/maxZoom/maxBounds (still the full-Europe extent set up in main()), so
-// panning back out to see the rest of the map still works regardless of the selected market.
+// fits the camera to just the zones the current market covers. Does not touch
+// minZoom/maxZoom/maxBounds, so panning back out to the full map still works either way.
 function focusMarketZones() {
   if (!map) return;
   let bounds = null;
@@ -220,13 +190,8 @@ function focusMarketZones() {
   }
   if (!bounds) return;
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  // asymmetric padding, not a flat value - the auctions panel is docked top-left over the
-  // map itself (see index.html), so a tight zoom (e.g. IDA1's single BE polygon today) would
-  // otherwise land straight underneath it. Left gets extra room for the panel; the other
-  // three edges keep an ordinary margin (140, doubled again from 70 so a single-zone zoom
-  // like BE stays well clear of the coastline instead of cropping in tight).
-  // duration halved from Leaflet's default auto-computed flight time (~1.2s for this app's
-  // zoom range) to make the zoom-in/out feel twice as quick.
+  // extra left padding for the auctions panel, docked top-left over the map - otherwise a
+  // tight zoom (e.g. a single-zone auction) would land straight underneath it.
   map.flyToBounds(bounds, {
     paddingTopLeft: [300, 140],
     paddingBottomRight: [140, 140],
@@ -235,9 +200,8 @@ function focusMarketZones() {
   });
 }
 
-// re-applies zoneStyle()/zoneLabelHtml() to every already-rendered zone layer from whatever
-// data it last got, without a new fetch - shared by selectView (view changed) and the theme
-// toggle (colors changed) below, since both need the exact same "repaint, don't refetch" step.
+// re-applies zoneStyle()/zoneLabelHtml() to every rendered zone layer without a new fetch -
+// shared by selectView and the theme toggle.
 function repaintZones() {
   for (const [zoneCode, layer] of zoneLayers) {
     layer.setStyle(zoneStyle(layer._priceInfo, zoneCode));
@@ -276,9 +240,7 @@ function renderAuctions() {
   const rows = auctionsCollapsed
     ? lastAuctionsData.auctions.filter((a) => a.key === currentMarket)
     : lastAuctionsData.auctions;
-  // group headers (Day-ahead / IDA / VWAP) - a thin divider + small title whenever the group
-  // changes, skipping the divider on the very first group so the panel title isn't doubled up.
-  // Collapsed view is just the one selected row, so group headers would be redundant noise.
+  // group headers (Day-ahead / IDA / VWAP), skipped in collapsed view (redundant with one row).
   let html = "";
   let lastGroup = null;
   for (const a of rows) {
@@ -299,11 +261,9 @@ function renderAuctions() {
   setActiveAuctionRow();
 }
 
-// deliberately no response caching or prefetching here (tried and reverted - see git history) -
-// this repo's dedup/rescrape strategy allows a rescrape to insert a new row at any time for an
-// already-published day (see Dedup/rescrape strategy in project-overview.md), and for a trading
-// tool a changed price silently not showing up because of a cache window matters more than
-// shaving the round-trip on a revisit. Every load/switch always hits the backend live.
+// deliberately no response caching or prefetching - a rescrape can change an already-published
+// day's price at any time, and a stale value not showing up matters more than saving a
+// round-trip. Every load/switch always hits the backend live.
 async function fetchPrices(dateStr, market, resolution) {
   const params = new URLSearchParams({ market });
   if (dateStr) params.set("date", dateStr);
@@ -316,12 +276,9 @@ async function fetchAuctions(dateStr) {
   return fetch(`/api/auctions${params}`).then((r) => r.json());
 }
 
-// auctions panel: status per auction for whatever date is currently on the map (dateStr comes
-// straight from the resolved /api/prices date, see loadPrices/main below) - so paging back to
-// an already-backfilled day shows e.g. 41/41 there, not always the live day's own status.
-// requestId guards against a slower request finishing after a newer one - fast rapid-fire day
-// switches used to risk the map settling on a superseded response instead of the last one
-// actually requested, since responses aren't guaranteed to land in request order.
+// auctions panel: status per auction for whatever date is currently on the map, so paging back
+// to an already-backfilled day shows its own status, not the live day's. requestId guards
+// against a slower request finishing after a newer one, since responses can land out of order.
 let auctionsRequestId = 0;
 
 async function loadAuctions(dateStr) {
@@ -341,14 +298,12 @@ function toggleAuctionsCollapsed() {
   renderAuctions();
 }
 
-// auctions checked in the download panel - persisted across opens/closes within the session
-// (not reset to just currentMarket every time), seeded with currentMarket only the first time
-// the panel opens with nothing selected yet.
+// auctions checked in the download panel - persisted across opens/closes within the session,
+// seeded with currentMarket only the first time the panel opens with nothing selected.
 const selectedDownloadMarkets = new Set();
 
-// renders the download panel's auction checkboxes, grouped the same way as the auctions panel
-// (see AUCTION_GROUPS) - deliberately auction-only, no bidding-zone filter (considered and
-// dropped as too fiddly for the gain, see project-overview.md).
+// renders the download panel's auction checkboxes - deliberately auction-only, no
+// bidding-zone filter.
 function renderDownloadPanel() {
   let html = "";
   let lastGroup = null;
@@ -446,11 +401,8 @@ function priceToColor(price) {
   return `rgb(${rgb.join(",")})`;
 }
 
-// in-scope zone, just no rows landed yet for this day ("pending") - low fillOpacity keeps it
-// close to the map's own background so it doesn't compete for attention with priced zones,
-// while still reading as the lighter/more "alive" of the two no-data greys (see
-// notApplicableStyle below) - the closer a zone is to actually getting data, the more visually
-// prominent its grey. shared by both views.
+// in-scope zone, just no rows landed yet for this day ("pending") - lighter grey than
+// notApplicableStyle, reads as more "alive"/closer to getting data. Shared by both views.
 function noDataStyle() {
   return {
     fillColor: cssVar("--nodata-fill"), fillOpacity: 0.4,
@@ -458,16 +410,10 @@ function noDataStyle() {
   };
 }
 
-// zone this market will never cover (e.g. GB/IE under SDAC, or every zone but 4 under IDA1) -
-// reuses the context layer's own opaque grey rather than a dedicated third tier: a middle grey
-// squeezed between noDataStyle and the context layer can't clear the dataviz skill's OKLab
-// separation floor once actually composited over the context layer (which is what's really
-// underneath every zone shape here, not the map's own background gradient) - for a narrow
-// auction like IDA1 almost the whole map fell into this middle tier, so the collapse read as
-// "every zone still pending" instead of "only these 4 zones matter". Reusing context-fill at its
-// own established opacity passes cleanly and reads as "recedes into the map background", which
-// fits - same fix as the imbalance dashboard's notScrapedStyle. Full opacity does blot out the
-// grid lines under these zones rather than just tinting them, an accepted tradeoff there too.
+// zone this market will never cover (e.g. GB/IE under SDAC) - reuses the context layer's own
+// opaque grey rather than a dedicated third tier, which couldn't clear the dataviz skill's
+// contrast floor against the pending grey once actually composited. Also blots out the grid
+// lines under these zones (accepted tradeoff).
 function notApplicableStyle() {
   return {
     fillColor: cssVar("--context-fill"), fillOpacity: 1,
@@ -490,10 +436,8 @@ function priceZoneStyle(info, zoneCode) {
   return noDataStyle();
 }
 
-// zone counts as fully "in" once at least one of its sources landed every settlement period
-// expected for the day - a second, incomplete source doesn't drag a zone with one complete
-// source back down to partial, consistent with the ≥1-live-source redundancy framing used
-// everywhere else in this project (see project-overview.md Goal/Monitoring).
+// zone counts as fully "in" once at least one of its sources landed every expected period for
+// the day - a second, incomplete source doesn't drag a complete zone back down to partial.
 function zoneCoverage(info) {
   if (!info || !info.has_data) return "missing";
   return info.sources.some((s) => s.actual >= s.expected) ? "complete" : "partial";
@@ -527,11 +471,8 @@ function formatPrice(info) {
 }
 
 function zoneLabelHtml(zoneCode, info) {
-  // a zone this market will never cover (see notApplicableStyle) gets no code label either -
-  // the fill already reads as "ignore me" via --context-fill, and a code chip on top of that
-  // undoes it by drawing the eye right back to the zone. currentMarketZones itself is dynamic
-  // (get_market_zones() querying prod.prices, see app.py), not a hardcoded per-auction list, so
-  // this follows whatever zones actually land data for the selected auction without a code change.
+  // a zone this market will never cover gets no code label either - a chip on top of the
+  // recessive fill would draw the eye right back to a zone meant to be ignored.
   if (!currentMarketZones.has(zoneCode)) return "";
   // coverage view is a quick have-we-got-it check, not a price readout - price stays hidden
   // there even when available, so the chip doesn't compete with the green/orange/grey fill.
@@ -540,12 +481,8 @@ function zoneLabelHtml(zoneCode, info) {
 }
 
 // binds/unbinds the permanent zone-code label as needed, rather than a bare setTooltipContent -
-// Leaflet's tooltip update skips a falsy content string (leaving whatever was last rendered on
-// screen), so a not-applicable zone's empty zoneLabelHtml() would otherwise just freeze on
-// whatever code/price it last showed instead of actually disappearing. Also handles a zone
-// flipping the other way (not-applicable -> applicable, e.g. switching back to an auction that
-// covers it), which needs a real bindTooltip, not a content update on a tooltip that no longer
-// exists.
+// Leaflet's tooltip update skips a falsy content string, so an empty zoneLabelHtml() would
+// otherwise freeze on whatever it last showed instead of disappearing.
 function updateZoneLabel(layer, zoneCode, info) {
   const html = zoneLabelHtml(zoneCode, info);
   if (!html) {
@@ -585,12 +522,9 @@ function currentMinutesInDeliveryTz() {
   return timeToMinutes(hhmm);
 }
 
-// x-coordinate of "now" (current time-of-day) mapped onto this curve's own timeline - lines up
-// with "this point in the day" regardless of which date is being viewed, so today's progress so
-// far can be compared at a glance against the same point on a past day. Interpolates between the
-// two periods either side of now (treating each period's value as sitting at its own midpoint,
-// matching how the old dots were positioned); clamps to the near edge if now falls outside the
-// curve's own range (e.g. a live day where the latest period lags a few minutes behind).
+// x-coordinate of "now" mapped onto this curve's own timeline, so today's progress lines up
+// with the same point on a past day. Interpolates between the two periods either side of now,
+// clamped to the near edge if now falls outside the curve's own range.
 function nowLineX(points, xAt, stepX) {
   const nowMin = currentMinutesInDeliveryTz();
   const n = points.length;
@@ -607,9 +541,7 @@ function nowLineX(points, xAt, stepX) {
   return mid(n - 1);
 }
 
-// three evenly-spaced horizontal reference lines - hidden by default (see style.css), shown only
-// in the expanded card where there's enough room for them to help read value/height without
-// cluttering the small one.
+// three evenly-spaced horizontal reference lines, expanded-card only (no room in the small one).
 function gridLinesSvg(W, H, PAD) {
   return [0.25, 0.5, 0.75]
     .map((f) => PAD + (H - PAD * 2) * f)
@@ -617,11 +549,8 @@ function gridLinesSvg(W, H, PAD) {
     .join("");
 }
 
-// value label for each gridline above (same fractions, same PAD/H math) - a gridline on its own
-// only tells you "here's some reference height", not what it actually means. Overlaid with a
-// small background chip rather than reserving an axis gutter - same technique as
-// .chart-hover-label - so it stays legible over the line either way. Expanded-only, same as the
-// gridlines it labels.
+// value label for each gridline above, overlaid as a small chip rather than a reserved axis
+// gutter. Expanded-only, same as the gridlines it labels.
 function gridLabelsHtml(H, PAD, lo, hi, formatFn) {
   const span = hi - lo || 1;
   return [0.25, 0.5, 0.75]
@@ -633,9 +562,8 @@ function gridLabelsHtml(H, PAD, lo, hi, formatFn) {
     .join("");
 }
 
-// a handful of evenly-spaced time labels along the bottom - orients the timeline the same way
-// gridLabelsHtml orients the value axis. Own reserved-height row below the chart (not overlaid),
-// so it doesn't compete with the line and doesn't require clipping. Expanded-only.
+// evenly-spaced time labels along the bottom, own reserved row so they don't overlap the line.
+// Expanded-only.
 function xAxisLabelsHtml(points, xAt, stepX, W) {
   const n = points.length;
   return [0, 0.25, 0.5, 0.75, 1]
@@ -648,29 +576,22 @@ function xAxisLabelsHtml(points, xAt, stepX, W) {
     .join("");
 }
 
-// small tag naming the vertical "now" marker (see nowLineX) - the bare line is enough at a
-// glance in the small card (shown there too), but a first-time viewer of the bigger expanded
-// card benefits from the line actually saying what it is.
+// small tag naming the vertical "now" marker (see nowLineX).
 function nowLabelHtml(nowX, W) {
   const leftPct = (nowX / W) * 100;
   const align = leftPct < 15 ? "translateX(0)" : leftPct > 85 ? "translateX(-100%)" : "translateX(-50%)";
   return `<span class="chart-now-label" style="left:${leftPct.toFixed(1)}%;transform:${align}">now</span>`;
 }
 
-// step-after LINE chart (no area fill) - a fill would shade down to the chart's bottom edge,
-// not to a meaningful zero baseline (the y-axis is scaled to the day's own min/max, like a stock
-// chart, not forced to include zero), so it wouldn't measure a real quantity, just however high
-// a price happens to sit in that day's own range. The line's single color already carries the
-// value (see headlineColor at the call site).
+// step-after LINE chart, no area fill - the y-axis is scaled to the day's own min/max (not
+// forced to include zero), so a fill down to the chart edge wouldn't measure a real quantity.
 function curveChartHtml(info, color) {
   if (!info.curve.length) return "";
   const W = 216, H = 56, PAD = 3;
   const prices = info.curve.map((p) => p.price);
   const lo = Math.min(...prices), hi = Math.max(...prices);
   const span = hi - lo || 1;
-  // step-after line: each settlement period is a flat segment spanning its own width (like
-  // Nordpool's day-ahead chart), not a diagonal between period-start points - a straight line
-  // implies the price glides continuously within a period, which isn't the case.
+  // each settlement period is a flat segment, not a diagonal - price doesn't glide within a period.
   const n = info.curve.length;
   const stepX = (W - PAD * 2) / n;
   const xAt = (i) => PAD + i * stepX; // left edge of period i
@@ -709,11 +630,8 @@ function curveChartHtml(info, color) {
   `;
 }
 
-// crosshair + value label on hover - expanded view only. the compact card stays a plain,
-// non-interactive glance; anyone wanting the per-period detail is expected to expand first.
-// re-bound after every setContent() (the toggle button's expand/collapse replaces the DOM, old
-// listeners go with it). period index comes from cursor x-position alone (no need to mirror
-// curveChartHtml's y-axis price mapping) since the label only ever needs that period's own value.
+// crosshair + value label on hover, expanded view only. Re-bound after every setContent() since
+// expand/collapse replaces the DOM. Period index comes from cursor x-position alone.
 function bindChartHover(root, info, expanded) {
   if (!expanded) return;
   const wrap = root.querySelector(".chart-wrap");
@@ -745,18 +663,14 @@ function bindChartHover(root, info, expanded) {
   });
 }
 
-// corner-bracket "enter/exit fullscreen" glyphs (same visual language as Apple's own SF Symbols
-// arrow.up.left.and.arrow.down.right / arrow.down.right.and.arrow.up.left) rather than the
-// Unicode ⤡/⤢ glyphs previously used here, which render inconsistently across fonts/platforms.
+// corner-bracket "enter/exit fullscreen" glyphs (SF Symbols style, not Unicode ⤡/⤢ which render
+// inconsistently across fonts).
 const EXPAND_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10V4h6"/><path d="M20 14v6h-6"/></svg>`;
 const COLLAPSE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4v5H4"/><path d="M15 20v-5h5"/></svg>`;
 const CLOSE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
 
-// keeps the hover card fully on-screen when the zone shape sits near the top of the map
-// (most visible with the expanded panel, which is much taller) - tries the default above-anchor
-// placement first, then flips below the anchor only if that placement would clip off the top of
-// the map container. Always re-tries "top" first rather than remembering the last direction, so
-// the card flips back once there's room again (e.g. after collapsing or panning).
+// keeps the hover card on-screen when it would clip the top of the map - tries "top" placement
+// first (always, not remembering the last direction), flips to "bottom" only if that clips.
 function keepTooltipInView(map, tooltip) {
   const el = tooltip.getElement();
   if (!el) return;
@@ -774,9 +688,7 @@ function keepTooltipInView(map, tooltip) {
 function tooltipHtml(zoneCode, info, expanded) {
   const name = ZONE_NAMES[zoneCode] || "";
   const expandBtn = `<button class="expand-btn" aria-label="${expanded ? "Collapse" : "Expand"}" title="${expanded ? "Collapse" : "Expand"}">${expanded ? COLLAPSE_ICON : EXPAND_ICON}</button>`;
-  // expanded only - the small card still closes on hover-out as before, so it doesn't need a
-  // dedicated close button; this is the one-click way out of the expanded state specifically,
-  // which no longer auto-closes on hover-out at all (see onEachFeature's mouseover handler).
+  // expanded only - the small card closes on hover-out, but the expanded one no longer does.
   const closeBtn = expanded ? `<button class="close-btn" aria-label="Close" title="Close">${CLOSE_ICON}</button>` : "";
   const title = `<div class="zone-title">${zoneCode}<span class="zone-name">${name}</span>${expandBtn}${closeBtn}</div>`;
   if (!info || !info.has_data) {
@@ -810,12 +722,9 @@ function applyPrices(priceByZone, cleared, marketZones) {
   }
 }
 
-// coverage view's header bar (replaces the price scale there, see index.html's #coverage-scale)
-// - left-to-right fill is the share of in-scope zones that have any data at all for this
-// market/date, green over a red track, purely illustrative (no counts) per request. Denominator
-// is currentMarketZones, not every key in priceByZone - a market that only ever covers a handful
-// of zones (e.g. N2EX, just GB) should be able to read 100%, not stall at a fraction because the
-// other 40 zones it was never going to cover count against it.
+// coverage view's header bar - share of zones with any data, illustrative only (no counts).
+// Denominator is currentMarketZones, not every key in priceByZone, so a narrow market like N2EX
+// can read 100% instead of being dragged down by zones it never covers.
 function updateCoverageScale(priceByZone) {
   const fill = document.getElementById("coverage-bar-fill");
   if (!fill) return;
@@ -874,10 +783,9 @@ async function loadPrices(dateStr) {
   }
 }
 
-// grid.geojson is purely decorative (see project-overview.md) - fetched separately, after the
-// interactive map is already up, so its ~2.5MB doesn't gate first paint on top of context/zones.
-// Runs on its own pane (z-index between context and zones, see main()) so stacking stays correct
-// no matter when this resolves relative to the rest of main()'s setup.
+// grid.geojson is purely decorative - fetched after the map is already up so its ~2.5MB doesn't
+// gate first paint. Own pane (z-index between context and zones) keeps stacking correct
+// regardless of load order.
 function loadGridLayer(map) {
   fetch("/static/geo/grid.geojson")
     .then((r) => r.json())
@@ -891,17 +799,12 @@ function loadGridLayer(map) {
     });
 }
 
-// Leaflet's built-in wheel zoom batches wheel deltas for ~40ms then jumps to a new
-// (zoomSnap-rounded) level with a CSS-transition animation - each tick of a continuous
-// scroll/trackpad gesture restarts that animation, which reads as a stepped, jumpy zoom no
-// matter how fine zoomSnap/wheelPxPerZoomLevel are set (already tried: zoomSnap 0.25,
-// wheelPxPerZoomLevel 100 - see the map init below, both still in place for double-click/button
-// zoom). This replaces it with a continuous handler, same technique as the well-known
-// Leaflet.SmoothWheelZoom plugin: each wheel event nudges a running "goal zoom", and a
-// requestAnimationFrame loop eases the live view toward it every frame via Leaflet's own
-// internal _move, instead of one discrete animated jump per debounce window. Registered instead
-// of the built-in scrollWheelZoom handler (see map init: scrollWheelZoom: false), not alongside
-// it - both fighting over the same wheel event would be worse than either alone.
+// Leaflet's built-in wheel zoom batches deltas then jumps to a new zoomSnap-rounded level,
+// which reads as stepped/jumpy on a continuous scroll gesture. This replaces it with a
+// continuous handler (same technique as Leaflet.SmoothWheelZoom): each wheel event nudges a
+// running "goal zoom", eased toward every frame via Leaflet's own internal _move. Registered
+// instead of the built-in scrollWheelZoom handler (map init: scrollWheelZoom: false), not
+// alongside it.
 L.Map.SmoothWheelZoom = L.Handler.extend({
   addHooks: function () {
     L.DomEvent.on(this._map.getContainer(), "wheel", this._onWheel, this);
@@ -924,9 +827,8 @@ L.Map.SmoothWheelZoom = L.Handler.extend({
       this._moved = false;
       this._raf = requestAnimationFrame(() => this._step());
     }
-    // clamp to min/max only, deliberately not map._limitZoom() - that also rounds to
-    // options.zoomSnap (0.25, kept for button/double-click/keyboard zoom), which would re-quantize
-    // this goal back to quarter-steps every tick and defeat the point of a continuous zoom.
+    // clamp to min/max only, not map._limitZoom() - that also rounds to zoomSnap, which would
+    // re-quantize this goal every tick and defeat the point of a continuous zoom.
     this._goalZoom = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), this._goalZoom - e.deltaY * 0.003));
     this._wheelPoint = map.mouseEventToContainerPoint(e);
     clearTimeout(this._endTimer);
@@ -978,12 +880,9 @@ async function main() {
   updateScaleLegend();
   updateCoverageScale(priceByZone);
 
-  // zoomSnap/zoomDelta below 1 let button/double-click/keyboard zoom rest at quarter zoom levels
-  // instead of only whole integers. Wheel zoom no longer goes through this at all - it's handled
-  // separately below (scrollWheelZoom: false + SmoothWheelZoom), since no snap/delta tuning of
-  // the built-in handler was enough to stop it feeling jumpy (see SmoothWheelZoom's own comment).
-  // zoomControl is added separately, top-right, to leave the top-left corner free for the
-  // auctions panel.
+  // zoomSnap/zoomDelta below 1 let button/double-click/keyboard zoom rest at quarter levels.
+  // Wheel zoom is handled separately (scrollWheelZoom: false + SmoothWheelZoom below).
+  // zoomControl is added separately, top-right, to leave top-left free for the auctions panel.
   map = L.map("map", {
     attributionControl: false, zoomControl: false, worldCopyJump: false, maxBoundsViscosity: 1.0,
     zoomSnap: 0.25, zoomDelta: 0.5, scrollWheelZoom: false,
@@ -992,16 +891,13 @@ async function main() {
   map.smoothWheelZoom.enable();
   const zoomControl = L.control.zoom({ position: "topright" }).addTo(map);
 
-  // dedicated panes (below zones' default overlayPane, z-index 400) so the background layers
-  // stack correctly (context < grid < zones) regardless of add order - needed because grid loads
-  // asynchronously after everything else, see loadGridLayer.
+  // dedicated panes (below zones' default overlayPane, z-index 400) so context < grid < zones
+  // stacks correctly regardless of add order - grid loads async, after everything else.
   map.createPane("context-pane").style.zIndex = 200;
   map.createPane("grid-pane").style.zIndex = 300;
 
-  // canvas renderer, not the default SVG - context/grid are non-interactive background layers
-  // (215 and ~19k features respectively), and SVG would mean one <path> DOM node per feature.
-  // Canvas draws them all onto a single element instead, far cheaper to parse/paint. Zones stays
-  // on the default SVG renderer since it needs per-feature hover/tooltip interactivity.
+  // canvas renderer for these non-interactive background layers (SVG would mean one DOM node
+  // per feature - grid alone is ~19k). Zones stays on SVG since it needs per-feature hover.
   L.geoJSON(contextGeo, {
     interactive: false,
     pane: "context-pane",
@@ -1016,11 +912,9 @@ async function main() {
       layer._priceInfo = priceByZone[zoneCode];
       zoneLayers.set(zoneCode, layer);
 
-      // Leaflet's own getCenter() (used to auto-position the permanent zone-code tooltip
-      // below, direction: "center") only looks at a MultiPolygon's *first* sub-polygon - wrong
-      // for zones split into mainland + island parts (FR/Corsica, FI/Aland), landing the label
-      // on whichever part is listed first instead of the zone's main body. label_lat/label_lon
-      // (build_geo.py's _label_point, largest-part representative_point) override it here.
+      // Leaflet's own getCenter() only looks at a MultiPolygon's first sub-polygon - wrong for
+      // zones split into mainland + island parts (FR/Corsica). label_lat/label_lon (build_geo.py's
+      // largest-part point) override it here.
       const { label_lat, label_lon } = feature.properties;
       if (label_lat != null && label_lon != null) {
         layer.getCenter = () => L.latLng(label_lat, label_lon);
@@ -1029,66 +923,52 @@ async function main() {
       updateZoneLabel(layer, zoneCode, layer._priceInfo);
 
       // a layer can have exactly one *bound* tooltip, so the permanent zone-code label uses
-      // bindTooltip while the hover source-breakdown is a separate unbound L.tooltip we
-      // add/move/remove by hand - two bindTooltip calls on the same layer would just replace
-      // each other instead of coexisting.
+      // bindTooltip while the hover source-breakdown is a separate unbound L.tooltip.
       layer.on("mouseover", () => {
-        // this market will never cover this zone (e.g. GB/IE under SDAC) - no hover card at
-        // all, not even a "no data" one, since there's nothing pending to report.
+        // this market will never cover this zone - no hover card at all, not even "no data".
         if (!currentMarketZones.has(zoneCode)) return;
         cancelClose();
         layer.setStyle({ weight: 2 });
         if (hoverTooltip) map.removeLayer(hoverTooltip);
 
         let expanded = false;
-        // read by the separate mouseout handler below (bound once outside this closure, so it
-        // can't see this `expanded` local directly) - expanded cards don't auto-close, so
-        // mouseout needs to know the current state to decide whether to schedule one.
+        // read by the mouseout handler below, bound outside this closure - expanded cards
+        // don't auto-close, so mouseout needs to know the current state.
         layer._expanded = false;
 
         // anchored at the shape's center, not the cursor - a tooltip that chases the mouse
-        // can never be clicked into (moving toward it just keeps moving it away).
+        // can never be clicked into.
         hoverTooltip = L.tooltip(layer.getBounds().getCenter(), {
           className: "source-tooltip", direction: "top", offset: [0, -10], interactive: true,
         })
           .setContent(tooltipHtml(zoneCode, layer._priceInfo, expanded))
           .addTo(map);
-        // stable reference to *this* hover instance - `hoverTooltip` itself gets reassigned the
-        // moment a different zone is hovered, so a deferred check below (which can still be
-        // pending after that happens) needs a way to tell "am I still the current one?"
+        // stable reference to *this* hover instance, since `hoverTooltip` gets reassigned the
+        // moment a different zone is hovered.
         const myTooltip = hoverTooltip;
 
         const el = hoverTooltip.getElement();
         if (el) {
-          // interactive:true stops mouse/wheel events from passing through to the map (so the
-          // expand button is actually clickable), which otherwise also lets the map itself
-          // absorb the wheel event as a zoom - disableScrollPropagation stops that.
+          // interactive:true stops the map from absorbing wheel/click events meant for the
+          // card's own buttons/chart.
           L.DomEvent.disableScrollPropagation(el);
           L.DomEvent.disableClickPropagation(el);
           el.addEventListener("mouseenter", cancelClose);
-          // collapsing (expanded -> small) shrinks the card in place around a fixed anchor,
-          // which can leave the cursor outside the new, smaller box - some browsers (observed
-          // in Chrome) resolve that layout change into a real `mouseleave` event even though the
-          // mouse never actually moved. suppressLeaveClose blocks *this* listener from treating
-          // that as a genuine hover-out right after a collapse (see the expand button's click
-          // handler below, which re-checks real hover state once the mouse actually moves again
-          // instead of trusting that event).
+          // collapsing the card can leave the cursor outside the new, smaller box, which some
+          // browsers resolve into a spurious mouseleave - suppressLeaveClose blocks that (see
+          // the expand button's click handler below, which re-checks real hover state instead).
           let suppressLeaveClose = false;
           el.addEventListener("mouseleave", () => {
-            // small card only - an expanded card is dismissed via its own button, not by the
-            // mouse leaving it (see the expand button's click handler and the mouseout handler
-            // below).
+            // small card only - an expanded card is dismissed via its own button.
             if (!expanded && !suppressLeaveClose) scheduleClose();
           });
           keepTooltipInView(map, hoverTooltip);
           bindChartHover(el, layer._priceInfo, expanded);
 
-          // setContent() replaces the button along with the rest of the markup, so the click
-          // listener needs rebinding after every toggle, not just once. keepTooltipInView() has
-          // to run before that rebinding, not after: it calls tooltip.update(), and Leaflet's
-          // DivOverlay.update() unconditionally re-runs _updateContent() (innerHTML = content)
-          // even though the content string hasn't changed - that silently recreates the button/
-          // chart-wrap nodes and orphans whatever listeners were just bound to them.
+          // rebind after every toggle since setContent() replaces the button along with the
+          // rest of the markup. keepTooltipInView() must run before this rebind, not after -
+          // its tooltip.update() call unconditionally re-runs Leaflet's _updateContent(),
+          // which recreates these nodes and would orphan whatever was just bound to them.
           const bindExpandButton = () => {
             const btn = el.querySelector(".expand-btn");
             if (!btn) return;
@@ -1105,12 +985,8 @@ async function main() {
               bindCloseButton();
               bindChartHover(el, layer._priceInfo, expanded);
               if (!expanded) {
-                // just collapsed to small - ignore any mouseleave for now (see above; it may
-                // just be the resize, not a real hover-out). The mouse hasn't necessarily moved
-                // at all yet either, so a fixed delay just closes it a moment later for the same
-                // reason - wait for the user's *next actual movement* before deciding anything:
-                // if they're still off the (now smaller) card by then, close it for real; if
-                // they've settled back over it, hand control back to the normal listener above.
+                // just collapsed to small - the resize itself may trigger a spurious mouseleave,
+                // so wait for the user's next actual mouse movement before deciding to close.
                 cancelClose();
                 suppressLeaveClose = true;
                 document.addEventListener(
@@ -1124,8 +1000,7 @@ async function main() {
               }
             });
           };
-          // same rebind-after-setContent need as bindExpandButton - the close button itself is
-          // replaced along with the rest of the title row on every toggle.
+          // same rebind-after-setContent need as bindExpandButton.
           const bindCloseButton = () => {
             const btn = el.querySelector(".close-btn");
             if (!btn) return;
@@ -1141,38 +1016,28 @@ async function main() {
       });
       layer.on("mouseout", () => {
         layer.setStyle({ weight: 1 });
-        // expanded card stays open regardless of the mouse leaving the zone shape - only its own
-        // button (toggle back to small, or close entirely) dismisses it. Small card keeps the
-        // existing hover-out-to-close behavior.
+        // expanded card stays open on mouse-out - only its own button dismisses it.
         if (!layer._expanded) scheduleClose();
       });
     },
   }).addTo(map);
 
   const europeBounds = zonesLayer.getBounds();
-  // padding 30 (was 16) for a touch of extra default zoom-out, then panBy shifts the settled
-  // view right so the now-taller auctions panel (12 auctions across 3 groups, docked top-left)
-  // doesn't start out overlapping IE/GB. setMaxBounds below is derived from *this* shifted view
-  // (map.getBounds(), not the raw europeBounds) - deriving it from the raw bounds instead would
-  // re-clamp the view straight back to center, undoing the panBy the moment it's applied.
+  // panBy shifts the settled view right so the auctions panel (docked top-left) doesn't start
+  // out overlapping IE/GB. setMaxBounds below derives from this shifted view (map.getBounds()),
+  // not the raw europeBounds, or the clamp would undo the panBy immediately.
   map.fitBounds(europeBounds, { padding: [30, 30] });
   map.panBy([-80, 0], { animate: false });
 
-  // lock the camera to "all of Europe" as the widest view and a generously padded version of
-  // the shifted default view as the pan limit. context.geojson itself covers the whole world (so
-  // panning shows real grey landmass, not empty background, if these limits are ever loosened) -
-  // this restriction is purely about what's useful to look at, not a workaround for missing data.
+  // lock the camera to "all of Europe" as the widest view, generously padded, as the pan limit.
   map.setMinZoom(map.getZoom());
   map.setMaxZoom(map.getZoom() + 6);
   map.setMaxBounds(map.getBounds().pad(0.25));
   window.addEventListener("resize", () => map.invalidateSize());
 
-  // "reset view" button stacked above zoom in/out, inserted into the same Leaflet control bar
-  // (not a separate control) so it picks up leaflet.css's own stacked-button borders/corner
-  // rounding for free. Resets to the exact center/zoom the map settled on above (post
-  // fitBounds+panBy+clamp), not a re-run of fitBounds - re-running fitBounds here would recompute
-  // against zonesLayer's raw bounds and skip the panBy shift, landing on a different view than
-  // what the user actually started on.
+  // "reset view" button inserted into the same Leaflet control bar as zoom in/out. Resets to the
+  // exact center/zoom the map settled on above, not a re-run of fitBounds (which would skip the
+  // panBy shift).
   const defaultCenter = map.getCenter();
   const defaultZoom = map.getZoom();
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1181,9 +1046,7 @@ async function main() {
   resetLink.title = "Reset view";
   resetLink.setAttribute("role", "button");
   resetLink.setAttribute("aria-label", "Reset view");
-  // four corner brackets ("viewfinder"/fit-to-frame icon) rather than a house - same corner-
-  // bracket language as the hover card's own expand/collapse icons above, just closed into a
-  // full frame instead of two opposing corners.
+  // four corner brackets (viewfinder icon), same visual language as the hover card's icons.
   resetLink.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V4h4"/><path d="M20 8V4h-4"/><path d="M4 16v4h4"/><path d="M20 16v4h-4"/></svg>`;
   L.DomEvent.disableClickPropagation(resetLink);
   L.DomEvent.on(resetLink, "click", L.DomEvent.stop).on(resetLink, "click", () => {
@@ -1217,9 +1080,7 @@ async function main() {
   document.querySelectorAll(".theme-btn").forEach((btn) => {
     btn.addEventListener("click", () => setTheme(btn.dataset.themeChoice));
   });
-  // an override made on another tab (or the OS setting itself) changing while this tab is open -
-  // only matters when there's no explicit override here, mirroring the CSS media query's own
-  // :not([data-theme="light"]) guard.
+  // OS setting changing while this tab is open - only matters with no explicit override here.
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     if (!document.documentElement.getAttribute("data-theme")) {
       refreshPriceRampColors();
