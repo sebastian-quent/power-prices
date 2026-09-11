@@ -7,9 +7,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# gcc + libpq-dev: psycopg2 (not psycopg2-binary) compiles from source at install time.
+# build-essential + libpq-dev: psycopg2 (not psycopg2-binary) compiles from source at install
+# time. git: quent_core is installed straight from its GitHub repo, not PyPI.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev ca-certificates curl \
+    build-essential libpq-dev git ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml poetry.lock ./
